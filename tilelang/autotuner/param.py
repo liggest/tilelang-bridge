@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import contextlib
+from copy import deepcopy
 import tilelang
 from tilelang import tvm as tvm
 from tvm.tirx import PrimFunc
 from tvm.target import Target
 from typing import TYPE_CHECKING, Literal, Any
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 import errno
 
@@ -45,6 +46,14 @@ TargetLike = str | dict[str, object] | Target
 
 
 @dataclass(frozen=True)
+class _FrozenCompileRequest:
+    context: Any
+    compiler_config: Any = None
+    compiler_environment: tuple[tuple[str, str], ...] = ()
+    layout_cost_model: str = "register-count"
+
+
+@dataclass(frozen=True)
 class CompileArgs:
     """Compile arguments for the auto-tuner. Detailed description can be found in `tilelang.jit.compile`.
     Attributes:
@@ -54,6 +63,8 @@ class CompileArgs:
         target_host: Target host for cross-compilation (default: None).
         verbose: Whether to enable verbose output (default: False).
         pass_configs: Additional keyword arguments to pass to the Compiler PassContext.
+        compile_flags: Additional compiler options, after derived and pass-config flags.
+        workspace_idx: A2A3 compatibility automatic workspace parameter indices.
         Refer to `tilelang.PassConfigKey` for supported options.
     """
 
@@ -63,9 +74,91 @@ class CompileArgs:
     target_host: TargetLike | None = None
     verbose: bool = False
     pass_configs: dict[str, Any] | None = None
+    compile_flags: list[str] | str | None = None
+    workspace_idx: list[int] | int | None = None
+    _frozen: _FrozenCompileRequest | None = field(default=None, kw_only=True, repr=False, compare=False)
+
+    def freeze(self, context=None):
+        """Resolve an actual tuning request; never called by import or pure hash."""
+        from tilelang.backend.module import create_backend_context
+
+        if self._frozen is not None:
+            return self
+        if context is None:
+            from tilelang.ascend.target import is_a2a3_target
+
+            if isinstance(self.target, Target) and not is_a2a3_target(self.target):
+                return self
+            if isinstance(self.target, dict) and self.target.get("kind") != "ascend":
+                return self
+            if isinstance(self.target, str):
+                target_text = self.target.strip()
+                if target_text.startswith("{"):
+                    try:
+                        if json.loads(target_text).get("kind") != "ascend":
+                            return self
+                    except ValueError:
+                        return self
+                elif not target_text or target_text.split()[0] not in {"auto", "asc", "ascend", "ascendc", "pto"}:
+                    return self
+        context = context or create_backend_context(self.target, self.target_host, self.execution_backend)
+        if context.module.name not in {"ascend_a2a3", "pto_a2a3"}:
+            return self
+        from tilelang.ascend.a2a3.compiler import resolve_compile_config
+        from tilelang.ascend.a2a3.pass_config import normalize_a2a3_pass_configs
+
+        effective = normalize_a2a3_pass_configs(context.target, self.pass_configs)
+        keys = ("TL_CCE_AUTO_SYNC", "TL_CCE_OPT_LEVEL", "TL_PTO_DEBUG")
+        environment = tuple((key, os.environ[key]) for key in keys if key in os.environ)
+        base = resolve_compile_config(context.target, effective, self.compile_flags)
+        layout_cost_model = tilelang.env.get_default_layout_cost_model() or "register-count"
+        return replace(
+            self,
+            target=context.target,
+            target_host=context.target_host,
+            execution_backend=context.execution_backend.name,
+            out_idx=deepcopy(self.out_idx),
+            workspace_idx=deepcopy(self.workspace_idx),
+            compile_flags=deepcopy(self.compile_flags),
+            pass_configs=deepcopy(self.pass_configs),
+            _frozen=_FrozenCompileRequest(context, base, environment, layout_cost_model),
+        )
+
+    def _prepare_a2a3_program(self, program):
+        from tilelang.jit import _prepare_compile_arguments
+        from tilelang.ascend.a2a3.compiler import with_compile_options
+        from tilelang.ascend.a2a3.pass_config import normalize_a2a3_pass_configs
+
+        state = self._frozen
+        if state is None or state.compiler_config is None:
+            raise ValueError("A2A3 candidate compilation requires a frozen tuning request")
+        out_idx, pass_configs, flags = _prepare_compile_arguments(program, self.out_idx, self.pass_configs, self.compile_flags)
+        # Merge source attributes before freezing the absent environment default:
+        # neither a PTO default nor the global environment overrides an explicit
+        # function-level pass config. The explicit built-in default also blocks
+        # later normalization from introducing a newly changed environment.
+        pass_configs = dict(pass_configs or {})
+        pass_configs.setdefault("tl.layout_cost_model", state.layout_cost_model)
+        effective = normalize_a2a3_pass_configs(state.context.target, pass_configs)
+        config = with_compile_options(state.compiler_config, effective, flags, environ=dict(state.compiler_environment))
+        return out_idx, effective, flags, config
 
     def compile_program(self, program: PrimFunc):
         """Compile one candidate program using this compile configuration."""
+        if self._frozen is not None and self._frozen.compiler_config is not None:
+            from tilelang.ascend.a2a3.kernel_cache import A2A3CythonKernelCache
+
+            out_idx, effective, flags, config = self._prepare_a2a3_program(program)
+            return A2A3CythonKernelCache().cached(
+                program,
+                out_idx,
+                workspace_idx=self.workspace_idx,
+                backend_context=self._frozen.context,
+                compile_config=config,
+                verbose=self.verbose,
+                pass_configs=effective,
+                compile_flags=flags,
+            )
         return tilelang.compile(
             program,
             out_idx=self.out_idx,
@@ -74,6 +167,8 @@ class CompileArgs:
             target_host=self.target_host,
             verbose=self.verbose,
             pass_configs=self.pass_configs,
+            **({"compile_flags": self.compile_flags} if self.compile_flags is not None else {}),
+            **({"workspace_idx": self.workspace_idx} if self.workspace_idx is not None else {}),
         )
 
     def __hash__(self):
@@ -82,7 +177,8 @@ class CompileArgs:
 
         # Resolve env-var-derived pass-config defaults so a changed environment
         # does not silently reuse tuning results produced under another one.
-        pass_configs = normalize_pass_configs(self.pass_configs)
+        a2a3_state = self._frozen is not None and self._frozen.compiler_config is not None
+        pass_configs = self.pass_configs if a2a3_state else normalize_pass_configs(self.pass_configs)
         data = {
             "out_idx": self.out_idx,
             "execution_backend": self.execution_backend,
@@ -91,6 +187,19 @@ class CompileArgs:
             "verbose": self.verbose,
             "pass_configs": json.dumps(pass_configs, sort_keys=True) if pass_configs else None,
         }
+        if self.compile_flags is not None:
+            data["compile_flags"] = self.compile_flags
+        if self.workspace_idx is not None:
+            data["workspace_idx"] = self.workspace_idx
+        if a2a3_state:
+            data["target"] = str(self._frozen.context.target)
+            data["target_host"] = str(self._frozen.context.target_host) if self._frozen.context.target_host else None
+            data["execution_backend"] = self._frozen.context.execution_backend.name
+            data["compiler_config"] = self._frozen.compiler_config.to_metadata()
+            # Explicit O2 and absent O2 can yield different VS candidates, even
+            # when their base compiler flags are the same. Keep that distinction.
+            data["compiler_environment"] = self._frozen.compiler_environment
+            data["layout_cost_model"] = self._frozen.layout_cost_model
         hash_obj = hashlib.sha256(json.dumps(data, sort_keys=True).encode("utf-8"))
         return int.from_bytes(hash_obj.digest(), byteorder="big")
 
@@ -312,6 +421,11 @@ class AutotuneResult:
         if verbose:
             logger.debug(f"Saving kernel parameters to disk: {params_path}")
         self._safe_write_file(params_path, "w", lambda f: f.write(dump_kernel_params(kernel.params)))
+        if getattr(getattr(kernel, "backend", None), "name", None) in {"ascend_a2a3", "pto_a2a3"}:
+            from tilelang.ascend.a2a3.kernel_cache import A2A3CythonKernelCache, runtime_metadata
+
+            metadata_path = os.path.join(cache_path, A2A3CythonKernelCache.runtime_metadata_path)
+            self._safe_write_file(metadata_path, "w", lambda file: json.dump(runtime_metadata(kernel), file, sort_keys=True))
 
     def _load_kernel_from_disk(
         self,
@@ -322,6 +436,7 @@ class AutotuneResult:
         compile_flags: list[str] | str | None = None,
         func: Callable = None,
         verbose: bool = False,
+        compile_args: CompileArgs | None = None,
     ) -> JITKernel:
         """
         Loads a previously compiled kernel from disk cache.
@@ -351,6 +466,10 @@ class AutotuneResult:
         params_path = os.path.join(cache_path, PARAMS_PATH)
 
         required_files = [*self._get_required_kernel_files(Path(cache_path), execution_backend), Path(params_path)]
+        if backend_context.module.name in {"ascend_a2a3", "pto_a2a3"}:
+            from tilelang.ascend.a2a3.kernel_cache import A2A3CythonKernelCache
+
+            required_files.append(Path(cache_path) / A2A3CythonKernelCache.runtime_metadata_path)
         if not all(file.exists() for file in required_files):
             return None
 
@@ -386,6 +505,32 @@ class AutotuneResult:
             logger.error(f"Error loading kernel parameters from disk: {e}")
 
         if host_kernel_source and device_kernel_source and kernel_params:
+            if backend_context.module.name in {"ascend_a2a3", "pto_a2a3"}:
+                from tilelang.ascend.a2a3.kernel_cache import A2A3CythonKernelCache, _is_missing_own_library, stamp_runtime_request
+
+                if compile_args is None:
+                    raise ValueError("A2A3 tuning restore requires the frozen compile request")
+                if compile_args._frozen is None:
+                    compile_args = compile_args.freeze(backend_context)
+                requested_out, effective, flags, config = compile_args._prepare_a2a3_program(func)
+                derived = stamp_runtime_request(func, compile_args.workspace_idx, config)
+                try:
+                    return A2A3CythonKernelCache()._build_kernel(
+                        derived,
+                        CachedTextSource(text=host_kernel_source),
+                        CachedTextSource(text=device_kernel_source),
+                        kernel_lib_path,
+                        kernel_params,
+                        backend_context,
+                        requested_out,
+                        effective,
+                        flags,
+                    )
+                except OSError as error:
+                    if not _is_missing_own_library(error, kernel_lib_path):
+                        raise
+                    logger.warning("A2A3 tuning kernel library disappeared during cache restore: %s", kernel_lib_path)
+                    return None
             return JITKernel.from_database(
                 func=func,
                 host_kernel_source=CachedTextSource(text=host_kernel_source),
@@ -412,7 +557,9 @@ class AutotuneResult:
         half-written result.
         """
         # Already saved (e.g. another process won the race with a complete entry).
-        if self._is_complete_result_dir(path, self.kernel.execution_backend):
+        a2a3 = getattr(getattr(self.kernel, "backend", None), "name", None) in {"ascend_a2a3", "pto_a2a3"}
+        variant_options = {"a2a3": True} if a2a3 else {}
+        if self._is_complete_result_dir(path, self.kernel.execution_backend, **variant_options):
             return
 
         # Keep autotuner staging under the shared namespace staging root so stale cleanup
@@ -467,13 +614,13 @@ class AutotuneResult:
             # save kernel
             self._save_kernel_to_disk(staging_path, self.kernel, verbose)
 
-            missing_files = self._get_missing_complete_result_files(staging_path, self.kernel.execution_backend)
+            missing_files = self._get_missing_complete_result_files(staging_path, self.kernel.execution_backend, **variant_options)
             if missing_files:
                 missing_names = ", ".join(path.name for path in missing_files)
                 raise RuntimeError(f"Incomplete autotune staging directory is missing required file(s): {missing_names}")
 
             # Repair stale/incomplete entries before making the new directory visible.
-            self._remove_incomplete_result_dir(path, self.kernel.execution_backend)
+            self._remove_incomplete_result_dir(path, self.kernel.execution_backend, **variant_options)
 
             # Durability barrier: keep the staged data ahead of the rename so a
             # crash cannot publish a truncated cache entry.
@@ -503,17 +650,28 @@ class AutotuneResult:
         verbose = compile_args.verbose
         from tilelang.backend.module import create_backend_context
 
-        requested_backend = compile_args.execution_backend
-        backend_context = create_backend_context(
-            compile_args.target,
-            compile_args.target_host,
-            requested_backend,
+        compile_args = compile_args.freeze()
+        state = compile_args._frozen
+        backend_context = (
+            state.context
+            if state is not None
+            else create_backend_context(compile_args.target, compile_args.target_host, compile_args.execution_backend)
         )
         # load best config
         if verbose:
             logger.debug(f"Loading best config from file: {path / BEST_CONFIG_PATH}")
         with open(path / BEST_CONFIG_PATH) as f:
             config = json.load(f)
+        if backend_context.module.name in {"ascend_a2a3", "pto_a2a3"}:
+            if compile_args._frozen is None:
+                compile_args = compile_args.freeze(backend_context)
+            # The public result stores the original config dictionary. The
+            # internal __pass_configs__ key exists only in compile-unit kwargs.
+            per_config = (config or {}).get("pass_configs")
+            if per_config:
+                merged = dict(compile_args.pass_configs or {})
+                merged.update(per_config)
+                compile_args = replace(compile_args, pass_configs=merged)
 
         # load function
         if verbose:
@@ -543,8 +701,9 @@ class AutotuneResult:
             backend_context,
             out_idx_override if out_idx_override is not None else compile_args.out_idx,
             compile_args.pass_configs,
-            None,  # compile_flags not tracked here
+            compile_args.compile_flags,
             func,
+            **({"compile_args": compile_args} if backend_context.module.name in {"ascend_a2a3", "pto_a2a3"} else {}),
         )
         if kernel is None:
             return None
@@ -583,9 +742,9 @@ class AutotuneResult:
         return files
 
     @classmethod
-    def _get_complete_result_files(cls, path: Path, execution_backend: str) -> list[Path]:
+    def _get_complete_result_files(cls, path: Path, execution_backend: str, *, a2a3=False) -> list[Path]:
         """Return the full file set that marks an autotune result complete."""
-        return list(
+        files = list(
             dict.fromkeys(
                 [
                     path / BEST_CONFIG_PATH,
@@ -598,21 +757,26 @@ class AutotuneResult:
                 ]
             )
         )
+        if a2a3:
+            from tilelang.ascend.a2a3.kernel_cache import A2A3CythonKernelCache
+
+            files.append(path / A2A3CythonKernelCache.runtime_metadata_path)
+        return files
 
     @classmethod
-    def _get_missing_complete_result_files(cls, path: Path, execution_backend: str) -> list[Path]:
+    def _get_missing_complete_result_files(cls, path: Path, execution_backend: str, *, a2a3=False) -> list[Path]:
         """Return complete-result files missing from a candidate cache path."""
-        return [file for file in cls._get_complete_result_files(path, execution_backend) if not file.exists()]
+        return [file for file in cls._get_complete_result_files(path, execution_backend, a2a3=a2a3) if not file.exists()]
 
     @classmethod
-    def _is_complete_result_dir(cls, path: Path, execution_backend: str) -> bool:
+    def _is_complete_result_dir(cls, path: Path, execution_backend: str, *, a2a3=False) -> bool:
         """Return whether a cache directory contains all required files."""
-        return path.is_dir() and not cls._get_missing_complete_result_files(path, execution_backend)
+        return path.is_dir() and not cls._get_missing_complete_result_files(path, execution_backend, a2a3=a2a3)
 
     @classmethod
-    def _remove_incomplete_result_dir(cls, path: Path, execution_backend: str) -> bool:
+    def _remove_incomplete_result_dir(cls, path: Path, execution_backend: str, *, a2a3=False) -> bool:
         """Remove a stale incomplete result directory when present."""
-        if not path.is_dir() or cls._is_complete_result_dir(path, execution_backend):
+        if not path.is_dir() or cls._is_complete_result_dir(path, execution_backend, a2a3=a2a3):
             return False
         shutil.rmtree(path)
         return True
