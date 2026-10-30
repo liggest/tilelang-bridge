@@ -419,6 +419,14 @@ void CodeGenTileLangAscend::PrintStorageScope(const std::string &scope,
 
 void CodeGenTileLangAscend::VisitExpr_(const FloorDivNode *op,
                                        std::ostream &os) {
+  if (op->dtype.is_int() || op->dtype.is_uint()) {
+    os << "::tl::ascend::floor_div(";
+    PrintExpr(op->a, os);
+    os << ", ";
+    PrintExpr(op->b, os);
+    os << ")";
+    return;
+  }
   os << "(";
   PrintExpr(op->a, os);
   os << " / ";
@@ -428,6 +436,14 @@ void CodeGenTileLangAscend::VisitExpr_(const FloorDivNode *op,
 
 void CodeGenTileLangAscend::VisitExpr_(const FloorModNode *op,
                                        std::ostream &os) {
+  if (op->dtype.is_int() || op->dtype.is_uint()) {
+    os << "::tl::ascend::floor_mod(";
+    PrintExpr(op->a, os);
+    os << ", ";
+    PrintExpr(op->b, os);
+    os << ")";
+    return;
+  }
   os << "(";
   PrintExpr(op->a, os);
   os << " % ";
