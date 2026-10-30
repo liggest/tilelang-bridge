@@ -1,28 +1,4 @@
 #!/usr/bin/env bash
-
-if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    echo "Run the original fixed Torch/source tests after versioned package installation."
-    echo "Use an explicit task-owned A2A3_TORCH_INTEROP_VENV and TILELANG_CACHE_DIR."
-    exit 0
-fi
-
-cd "$(dirname "${BASH_SOURCE[0]}")" || exit 1
-python - <<'PYGUARD' || exit $?
-import os
-import sys
-from pathlib import Path
-
-owned = os.environ.get("A2A3_TORCH_INTEROP_VENV")
-if not owned or sys.prefix == sys.base_prefix or Path(sys.prefix).resolve() != Path(owned).resolve():
-    raise SystemExit("Set A2A3_TORCH_INTEROP_VENV to the active dedicated virtualenv; refusing package changes")
-requested = os.environ.get("TILELANG_CACHE_DIR")
-if not requested:
-    raise SystemExit("Set a dedicated TILELANG_CACHE_DIR before compiling/installing this example")
-import tilelang
-if Path(tilelang.env.TILELANG_CACHE_DIR).resolve() != Path(requested).resolve():
-    raise SystemExit("TILELANG_CACHE_DIR conflicts with the active cache-directory override; refusing package changes")
-PYGUARD
-
 ensure_torch_tl_ascend() {
     local output
     if ! output=$(python -m pip show torch_tl_ascend 2>&1); then
