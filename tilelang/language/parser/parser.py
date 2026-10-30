@@ -25,10 +25,10 @@ from typing import Any
 
 import tvm
 from tvm.ir import GlobalVar, PrimType
-from tvm.tirx import Buffer, IterVar, PrimExpr, Var
+from tvm.tir import Buffer, IterVar, PrimExpr, Var
 
 from tvm.script.ir_builder import ir as I
-from tvm.script.ir_builder import tirx as T
+from tvm.script.ir_builder import tir as T
 
 # May rewrite some register functions
 # if we use our own registration
@@ -146,12 +146,13 @@ def bind_assign_value(self: Parser, node: doc.expr, var_name: str, value: Any) -
         res = value.__enter__()
         IRBuilder.name(var_name, res)
         return res
-    elif isinstance(value, (Buffer, IterVar)) or (isinstance(value, Var) and not self.var_table.exist(value)):
+    elif isinstance(value, (Buffer, IterVar)) or (isinstance(value, Var) and
+                                                  not self.var_table.exist(value)):
         IRBuilder.name(var_name, value)
         return value
     else:
         value = tvm.runtime.convert(value)
-        frame = T.Let(value)
+        frame = T.LetStmt(value)
         var = frame.var
         IRBuilder.name(var_name, var)
         frame.add_callback(partial(frame.__exit__, None, None, None))
@@ -190,7 +191,8 @@ def visit_for(self: Parser, node: doc.For) -> None:
     if not isinstance(for_frame, T.frame.ForFrame):
         self.report_error(
             node.iter,
-            "Expect the for loop to be one of the following: range, T.serial, T.grid, T.parallel, T.vectorized, T.unroll, T.thread_binding",
+            "Expect the for loop to be one of the following: "
+            "range, T.serial, T.grid, T.parallel, T.vectorized, T.unroll, T.thread_binding",
         )
     with self.var_table.with_frame():
         with for_frame as iters:
@@ -337,7 +339,7 @@ def visit_ann_assign(self: Parser, node: doc.AnnAssign) -> None:
     if not isinstance(ann_var, Var):
         self.report_error(node.annotation, "Annotation should be Var")
     self.eval_assign(target=lhs, source=ann_var, bind_value=bind_assign_value)
-    frame = T.Let(rhs, var=ann_var)
+    frame = T.LetStmt(rhs, var=ann_var)
     frame.add_callback(partial(frame.__exit__, None, None, None))
     frame.__enter__()
 
@@ -359,7 +361,8 @@ def visit_with(self: Parser, node: doc.With) -> None:
         for item in node.items:
             frame = self.eval_expr(item.context_expr)
             if not isinstance(frame, Frame):
-                self.report_error(item.context_expr, "Invalid context expression in the with-statement.")
+                self.report_error(item.context_expr,
+                                  "Invalid context expression in the with-statement.")
             rhs = stack.enter_context(frame)
             if item.optional_vars is not None:
                 self.eval_assign(target=item.optional_vars, source=rhs, bind_value=bind_with_value)
@@ -456,16 +459,16 @@ def visit_expr_stmt(self: Parser, node: doc.Expr) -> None:
     elif isinstance(res, PrimExpr):
         T.evaluate(res)
     elif isinstance(res, (int, bool)):
-        T.evaluate(tvm.tirx.const(res))
+        T.evaluate(tvm.tir.const(res))
     elif isinstance(res, (tvm.relay.Call, tvm.relax.Call)) and not res.args:
         # Using GlobalVar.__call__ with no arguments is ambiguous, as
         # each IR has a different function Call representation.  If
         # this occurs, convert to the TIR representation.
-        T.evaluate(tvm.tirx.call_tir(res.op))
+        T.evaluate(tvm.tir.call_tir(res.op))
     elif isinstance(res, str):
         # Ignore docstrings
         pass
-    elif isinstance(res, tvm.tirx.stmt.BufferStore):
+    elif isinstance(res, tvm.tir.stmt.BufferStore):
         T.buffer_store(res.buffer, res.value, res.indices, res.predicate)
     else:
         self.report_error(node, f"Parsing resulted in unexpected type {type(res)}")
@@ -485,7 +488,7 @@ def visit_if(self: Parser, node: doc.If) -> None:
     """
     with self.var_table.with_frame():
         predicate = self.eval_expr(node.test)
-        if isinstance(predicate, (PrimExpr, tvm.tirx.expr.ExprOp)):
+        if isinstance(predicate, (PrimExpr, tvm.tir.expr.ExprOp)):
             with T.If(self.eval_expr(node.test)):
                 with T.Then():
                     with self.var_table.with_frame():
@@ -502,7 +505,8 @@ def visit_if(self: Parser, node: doc.If) -> None:
                 with self.var_table.with_frame():
                     self.visit_body(node.orelse)
         else:
-            self.report_error(node.test, f"If condition must be a boolean expression, but got {predicate}")
+            self.report_error(node.test,
+                              f"If condition must be a boolean expression, but got {predicate}")
 
 
 @dispatch.register(token="tir", type_name="Assert")
@@ -539,7 +543,7 @@ def visit_return(self: Parser, node: doc.Return) -> None:
     value = self.eval_expr(node.value)
     if value is None:
         self.report_error(node, "Expression to be returned must be a PrimExpr")
-    T.evaluate(tvm.tirx.ret(value))
+    T.evaluate(tvm.tir.ret(value))
 
 
 @dispatch.register(token="tir", type_name="tvm_declare_function")
@@ -581,5 +585,5 @@ def visit_tvm_declare_function(self: Parser, node: doc.FunctionDef) -> GlobalVar
             IRBuilder.name(arg.arg, ann)
             arg_annotations.append(ann)
 
-    func_signature = tvm.tirx.PrimFunc(arg_annotations, None, ret_type=ret_type)
+    func_signature = tvm.tir.PrimFunc(arg_annotations, None, ret_type=ret_type)
     return I.decl_function(node.name, func_signature)

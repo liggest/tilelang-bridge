@@ -6,4 +6,3 @@ behavior from upstream TVMScript for TileLang semantics.
 
 # Register parser overrides upon import.
 from . import parser  # noqa: F401
-from . import buffer  # noqa: F401

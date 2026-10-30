@@ -1,13 +1,20 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
-set -eux
+# Copyright (c) Tile-AI Corporation.
+# Licensed under the MIT License.
 
-rm -rf dist
+# if dist and build directories exist, remove them
+if [ -d dist ]; then
+    rm -r dist
+fi
 
-python -mpip install -U pip
-python -mpip install -U build wheel
+python -m build --wheel -o dist
 
-NO_VERSION_LABEL=1 python -m build --sdist
-python -m build --wheel
+python setup.py sdist --formats=gztar,zip 
 
-echo "Wheel built successfully."
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to build the wheel."
+    exit 1
+else
+    echo "Wheel built successfully."
+fi

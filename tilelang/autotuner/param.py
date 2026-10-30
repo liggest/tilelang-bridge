@@ -2,46 +2,32 @@
 
 from __future__ import annotations
 
-import contextlib
 import tilelang
 from tilelang import tvm as tvm
-from tvm.tirx import PrimFunc
+from tvm.tir import PrimFunc
 from tvm.target import Target
-from typing import TYPE_CHECKING, Literal, Any
-from collections.abc import Callable
+from typing import Callable, Literal, Any
 from dataclasses import dataclass
 from pathlib import Path
-import errno
 
 from tilelang.jit import JITKernel
-from tilelang.jit.adapter.base import CachedTextSource
+from tilelang.utils.target import determine_platform
+from tilelang.utils.file import atomic_copy, error_reports_missing_path, is_file_missing
 import cloudpickle
 import os
-import shutil
-from tilelang.engine.param import KernelParam, dump_kernel_params, load_kernel_params
+from tilelang.engine.param import KernelParam
 from tilelang import logger
 import json
 import hashlib
-import uuid
-from tvm.runtime import Executable
-
-if TYPE_CHECKING:
-    from tilelang.backend.module import BackendContext
 
 BEST_CONFIG_PATH = "best_config.json"
 FUNCTION_PATH = "function.pkl"
-OUT_IDX_PATH = "out_idx.json"
 LATENCY_PATH = "latency.json"
-
-# Align file names with cache/kernel_cache.py
-DEVICE_KERNEL_PATH = "device_kernel.cu"
-HOST_KERNEL_PATH = "host_kernel.cu"
-EXECUTABLE_PATH = "executable.so"
+KERNEL_PATH = "kernel.cu"
+WRAPPED_KERNEL_PATH = "wrapped_kernel.cu"
 KERNEL_LIB_PATH = "kernel_lib.so"
-KERNEL_CUBIN_PATH = "kernel.cubin"
-KERNEL_PY_PATH = "kernel.py"
-PARAMS_PATH = "params.json"
-TargetLike = str | dict[str, object] | Target
+PARAMS_PATH = "params.pkl"
+AUTO_GM_IDX_PATH = "auto_gm_idx.pkl"
 
 
 @dataclass(frozen=True)
@@ -49,48 +35,52 @@ class CompileArgs:
     """Compile arguments for the auto-tuner. Detailed description can be found in `tilelang.jit.compile`.
     Attributes:
         out_idx: List of output tensor indices.
-        execution_backend: Execution backend to use for kernel execution (default: "auto").
-        target: Compilation target, either as a string, config dict, or a TVM Target object (default: "auto").
+        execution_backend: Execution backend to use for kernel execution (default: "cython").
+        target: Compilation target, either as a string or a TVM Target object (default: "auto").
         target_host: Target host for cross-compilation (default: None).
+        platform: Target hardware platform generation, e.g. "A2"/"A3"/"A5" (default:
+        "auto", resolved via ``TL_PLATFORM`` / device detection). See `tilelang.jit.compile`.
         verbose: Whether to enable verbose output (default: False).
         pass_configs: Additional keyword arguments to pass to the Compiler PassContext.
         Refer to `tilelang.PassConfigKey` for supported options.
+        compile_flags: Extra Bisheng compiler flags (e.g.
+        ``["--cce-auto-sync=off", "-O3"]``). See `tilelang.jit.compile`.
     """
 
     out_idx: list[int] | int | None = None
-    execution_backend: Literal["auto", "tvm_ffi", "cython", "nvrtc", "torch", "pto"] = "auto"
-    target: TargetLike = "auto"
-    target_host: TargetLike | None = None
+    execution_backend: Literal["dlpack", "ctypes", "cython"] = "cython"
+    target: Literal["auto", "cuda", "hip"] = "auto"
+    target_host: str | Target = None
+    platform: str = "auto"
     verbose: bool = False
     pass_configs: dict[str, Any] | None = None
+    compile_flags: list[str] | str | None = None
 
     def compile_program(self, program: PrimFunc):
-        """Compile one candidate program using this compile configuration."""
         return tilelang.compile(
             program,
             out_idx=self.out_idx,
-            execution_backend=self.execution_backend,
             target=self.target,
             target_host=self.target_host,
+            platform=self.platform,
             verbose=self.verbose,
             pass_configs=self.pass_configs,
+            compile_flags=self.compile_flags,
         )
 
     def __hash__(self):
-        """Return a stable hash for cache key construction."""
-        from tilelang.transform.pass_config import normalize_pass_configs
-
-        # Resolve env-var-derived pass-config defaults so a changed environment
-        # does not silently reuse tuning results produced under another one.
-        pass_configs = normalize_pass_configs(self.pass_configs)
         data = {
-            "out_idx": self.out_idx,
             "execution_backend": self.execution_backend,
             "target": str(self.target),
             "target_host": str(self.target_host) if self.target_host else None,
+            # Resolve "auto" so the key is partitioned by concrete platform
+            # (A2/A3/A5), matching KernelCache and respecting TL_PLATFORM.
+            "platform": determine_platform(self.platform),
             "verbose": self.verbose,
-            "pass_configs": json.dumps(pass_configs, sort_keys=True) if pass_configs else None,
+            "pass_configs": json.dumps(self.pass_configs, sort_keys=True) if self.pass_configs else None,
+            "compile_flags": json.dumps(self.compile_flags, sort_keys=True) if self.compile_flags else None,
         }
+
         hash_obj = hashlib.sha256(json.dumps(data, sort_keys=True).encode("utf-8"))
         return int.from_bytes(hash_obj.digest(), byteorder="big")
 
@@ -103,7 +93,6 @@ class ProfileArgs:
         warmup: Number of warmup iterations.
         rep: Number of repetitions for timing.
         timeout: Maximum time per configuration.
-        backend: Profiler backend - "event", "cupti", or "cudagraph".
         supply_type: Type of tensor supply mechanism.
         ref_prog: Reference program for correctness validation.
         supply_prog: Supply program for input tensors.
@@ -122,30 +111,25 @@ class ProfileArgs:
     warmup: int = 25
     rep: int = 100
     timeout: int = 30
-    backend: Literal["event", "cupti", "cudagraph"] = "event"
     supply_type: tilelang.TensorSupplyType = tilelang.TensorSupplyType.Auto
-    ref_prog: Callable = None
-    supply_prog: Callable = None
+    ref_prog: Callable | None = None
+    supply_prog: Callable | None = None
     rtol: float = 1e-2
     atol: float = 1e-2
     max_mismatched_ratio: float = 0.01
     skip_check: bool = False
-    manual_check_prog: Callable = None
+    manual_check_prog: Callable | None = None
     cache_input_tensors: bool = True
 
     def __hash__(self):
-        """Return a stable hash for profiling configuration reuse."""
         data = {
             "warmup": self.warmup,
             "rep": self.rep,
             "timeout": self.timeout,
-            "backend": self.backend,
             "supply_type": str(self.supply_type),
             "rtol": self.rtol,
             "atol": self.atol,
             "max_mismatched_ratio": self.max_mismatched_ratio,
-            "skip_check": self.skip_check,
-            "cache_input_tensors": self.cache_input_tensors,
         }
         hash_obj = hashlib.sha256(json.dumps(data, sort_keys=True).encode("utf-8"))
         return int.from_bytes(hash_obj.digest(), byteorder="big")
@@ -171,46 +155,6 @@ class AutotuneResult:
     func: Callable | None = None
     kernel: Callable | None = None
 
-    @staticmethod
-    def _load_binary(path: str):
-        """Load binary content from a cache artifact."""
-        with open(path, "rb") as file:
-            binary = file.read()
-        return binary
-
-    @staticmethod
-    def _safe_write_file(path: str, mode: str, operation: Callable[[Any], None]):
-        """Atomically write one cache file through a temporary sibling file."""
-        directory, filename = os.path.split(path)
-        temp_path = os.path.join(directory, f".{filename}.{os.getpid()}_{uuid.uuid4().hex}.tmp")
-        try:
-            with open(temp_path, mode) as temp_file:
-                operation(temp_file)
-                # Without this barrier a crash can persist the rename below
-                # before the file data, publishing a truncated file.
-                temp_file.flush()
-                os.fsync(temp_file.fileno())
-            os.replace(temp_path, path)
-        finally:
-            with contextlib.suppress(OSError):
-                os.remove(temp_path)
-
-    @staticmethod
-    def _safe_write_executable(executable: Executable, path: str):
-        """Atomically export one runtime executable to disk."""
-        directory, filename = os.path.split(path)
-        stem, suffix = os.path.splitext(filename)
-        temp_path = os.path.join(directory, f".{stem}.{os.getpid()}_{uuid.uuid4().hex}.tmp{suffix}")
-        try:
-            executable.export_library(temp_path)
-            # Flush exported data before the rename publishes the file.
-            with open(temp_path, "rb+") as temp_file:
-                os.fsync(temp_file.fileno())
-            os.replace(temp_path, path)
-        finally:
-            with contextlib.suppress(OSError):
-                os.remove(temp_path)
-
     def _save_kernel_to_disk(self, cache_path: Path, kernel: JITKernel, verbose: bool = False):
         """
         Persists a compiled kernel to disk cache.
@@ -225,102 +169,78 @@ class AutotuneResult:
             - kernel.cu: The compiled kernel source code
             - wrapped_kernel.cu: The wrapped kernel source code
             - kernel_lib.so: The compiled kernel library
-            - params.json: The serialized kernel parameters
+            - params.pkl: The serialized kernel parameters
         """
-        os.makedirs(cache_path, exist_ok=True)  # Ensure directory exists.
+        try:
+            os.makedirs(cache_path, exist_ok=True)  # Ensure directory exists
+        except FileNotFoundError:
+            # The cache directory disappeared while publishing; the compiled
+            # kernel is still usable, so abandon the save without failing.
+            logger.warning("Cache directory disappeared while saving kernel; skipping save: %s", cache_path)
+            return
 
-        # Save device kernel source code
-        device_kernel_path = os.path.join(cache_path, DEVICE_KERNEL_PATH)
-        if verbose:
-            logger.debug(f"Saving kernel source code to file: {device_kernel_path}")
-        device_kernel_source = kernel.kernel_source
-        if kernel.execution_backend == "cutedsl":
-            device_kernel_source = kernel.adapter.get_kernel_source(kernel_only=True)
-        if device_kernel_source is not None:
-            self._safe_write_file(device_kernel_path, "w", lambda f: f.write(device_kernel_source))
-
-        # Save host kernel source code (wrapped)
-        host_kernel_path = os.path.join(cache_path, HOST_KERNEL_PATH)
-        if verbose:
-            logger.debug(f"Saving wrapped kernel source code to file: {host_kernel_path}")
-        # Match kernel_cache behavior: use host source for tvm_ffi, otherwise wrapped kernel
-        if kernel.execution_backend == "tvm_ffi" or kernel.execution_backend == "cutedsl":
-            self._safe_write_file(host_kernel_path, "w", lambda f: f.write(kernel.adapter.get_host_source()))
-        else:
-            self._safe_write_file(host_kernel_path, "w", lambda f: f.write(kernel.adapter.get_kernel_source()))
-
-        # Save kernel library (backend-specific)
-        kernel_lib_file = self._get_kernel_lib_file(kernel.execution_backend)
-
-        kernel_lib_path = os.path.join(cache_path, kernel_lib_file)
-
-        if kernel.execution_backend == "nvrtc":
-            # Save cubin and python helper file
-            src_lib_path = kernel.adapter.libpath
-            kernel_py_path = os.path.join(cache_path, KERNEL_PY_PATH)
-            py_src_path = src_lib_path.replace(".cubin", ".py")
+        # Save kernel source code
+        try:
+            kernel_path = os.path.join(cache_path, KERNEL_PATH)
             if verbose:
-                logger.debug(f"Saving kernel nvrtc python code to file: {kernel_py_path}")
-            self._safe_write_file(kernel_py_path, "wb", lambda f: f.write(self._load_binary(py_src_path)))
-            if verbose:
-                logger.debug(f"Saving kernel library to file: {kernel_lib_path}")
-            self._safe_write_file(kernel_lib_path, "wb", lambda f: f.write(self._load_binary(src_lib_path)))
-        elif kernel.execution_backend == "tvm_ffi":
-            if hasattr(kernel.adapter, "libpath") and kernel.adapter.libpath:
-                src_lib_path = kernel.adapter.libpath
-                if verbose:
-                    logger.debug(f"Copying kernel library to file: {kernel_lib_path}")
-                self._safe_write_file(kernel_lib_path, "wb", lambda f: f.write(self._load_binary(src_lib_path)))
-            else:
-                executable = kernel.adapter.get_exportable_executable()
-                if verbose:
-                    logger.debug(f"Saving kernel executable to file: {kernel_lib_path}")
-                self._safe_write_executable(executable, kernel_lib_path)
-        elif kernel.execution_backend == "cutedsl":
-            # Save the Python source file (CuTeDSL "library" is a .py, not a .so)
-            src_lib_path = kernel.adapter.libpath
-            if verbose:
-                logger.debug(f"Saving CuTeDSL kernel Python source to file: {kernel_lib_path}")
-            self._safe_write_file(kernel_lib_path, "wb", lambda f: f.write(self._load_binary(src_lib_path)))
+                logger.debug(f"Saving kernel source code to file: {kernel_path}")
+            if kernel.kernel_source is not None:
+                with open(kernel_path, "w") as f:
+                    f.write(kernel.kernel_source)
+        except Exception as e:
+            logger.error(f"Error saving kernel source code to disk: {e}")
 
-            # Save launcher .so if present (compiled C++ launcher for TMA etc.)
-            lib_gen = kernel.adapter.lib_generator
-            launcher_src = getattr(lib_gen, "launcher_libpath", None)
-            if launcher_src and os.path.exists(launcher_src):
-                launcher_name = getattr(lib_gen, "launcher_libname", os.path.basename(launcher_src))
-                dst_launcher = os.path.join(cache_path, launcher_name)
-                if verbose:
-                    logger.debug(f"Saving CuTeDSL launcher library to file: {dst_launcher}")
-                self._safe_write_file(dst_launcher, "wb", lambda f: f.write(self._load_binary(launcher_src)))
+        # Save wrapped kernel source code
+        try:
+            wrapped_kernel_path = os.path.join(cache_path, WRAPPED_KERNEL_PATH)
+            if verbose:
+                logger.debug(f"Saving wrapped kernel source code to file: {wrapped_kernel_path}")
+            with open(wrapped_kernel_path, "w") as f:
+                f.write(kernel.get_kernel_source())
+        except Exception as e:
+            logger.error(f"Error saving wrapped kernel source code to disk: {e}")
 
-            # Save cubin if already generated (generated during autotuning benchmark)
-            src_dir = os.path.dirname(src_lib_path)
-            src_cubin = os.path.join(src_dir, "kernel.cubin")
-            if os.path.exists(src_cubin):
-                dst_cubin = os.path.join(cache_path, KERNEL_CUBIN_PATH)
-                if verbose:
-                    logger.debug(f"Saving CuTeDSL cubin to file: {dst_cubin}")
-                self._safe_write_file(dst_cubin, "wb", lambda f: f.write(self._load_binary(src_cubin)))
-        else:
+        # Save kernel library
+        try:
+            kernel_lib_path = os.path.join(cache_path, KERNEL_LIB_PATH)
             src_lib_path = kernel.adapter.libpath
             if verbose:
                 logger.debug(f"Saving kernel library to file: {kernel_lib_path}")
-            self._safe_write_file(kernel_lib_path, "wb", lambda f: f.write(self._load_binary(src_lib_path)))
+            atomic_copy(src_lib_path, kernel_lib_path)
+        except Exception as e:
+            logger.error(f"Error saving kernel library to disk: {e}")
 
         # Save kernel parameters
-        params_path = os.path.join(cache_path, PARAMS_PATH)
-        if verbose:
-            logger.debug(f"Saving kernel parameters to disk: {params_path}")
-        self._safe_write_file(params_path, "w", lambda f: f.write(dump_kernel_params(kernel.params)))
+        try:
+            params_path = os.path.join(cache_path, PARAMS_PATH)
+            if verbose:
+                logger.debug(f"Saving kernel parameters to disk: {params_path}")
+            with open(params_path, "wb") as f:
+                cloudpickle.dump(kernel.params, f)
+        except Exception as e:
+            logger.error(f"Error saving kernel parameters to disk: {e}")
+
+        # Save auto_gm_idx (workspace reduction indices needed for runtime allocation)
+        try:
+            auto_gm_idx_path = os.path.join(cache_path, AUTO_GM_IDX_PATH)
+            if verbose:
+                logger.debug(f"Saving auto_gm_idx to file: {auto_gm_idx_path}")
+            with open(auto_gm_idx_path, "w") as f:
+                json.dump(kernel.auto_gm_idx, f)
+        except Exception as e:
+            logger.error(f"Error saving auto_gm_idx to disk: {e}")
 
     def _load_kernel_from_disk(
         self,
         cache_path: Path,
-        backend_context: BackendContext,
+        target: str | Target = "auto",
+        target_host: str | Target = None,
         out_idx: list[int] | int | None = None,
+        execution_backend: Literal["dlpack", "ctypes", "cython"] = "cython",
         pass_configs: dict = None,
-        compile_flags: list[str] | str | None = None,
         func: Callable = None,
+        compile_flags: list[str] | str | None = None,
+        platform: str = "auto",
         verbose: bool = False,
     ) -> JITKernel:
         """
@@ -328,8 +248,10 @@ class AutotuneResult:
 
         Args:
             key (str): The hash key identifying the kernel.
-            backend_context: Resolved backend state for this compilation.
+            target (Union[str, Target]): Compilation target platform. Defaults to "auto".
+            target_host (Union[str, Target], optional): Host target platform.
             out_idx (List[int], optional): Indices specifying which outputs to return.
+            execution_backend (Literal): Backend type for execution. Defaults to "cython".
             pass_configs (dict, optional): Configuration for compiler passes.
             func (Callable, optional): The original function.
             verbose (bool): Enable verbose log messages.
@@ -341,210 +263,177 @@ class AutotuneResult:
         if not os.path.exists(cache_path):
             return None
 
-        # Resolve backend to pick correct file names
-        execution_backend = backend_context.execution_backend.name
-        kernel_lib_file = self._get_kernel_lib_file(execution_backend)
-
-        device_kernel_path = os.path.join(cache_path, DEVICE_KERNEL_PATH)
-        host_kernel_path = os.path.join(cache_path, HOST_KERNEL_PATH)
-        kernel_lib_path = os.path.join(cache_path, kernel_lib_file)
-        params_path = os.path.join(cache_path, PARAMS_PATH)
-
-        required_files = [*self._get_required_kernel_files(Path(cache_path), execution_backend), Path(params_path)]
-        if not all(file.exists() for file in required_files):
-            return None
-
-        device_kernel_source: str | None = None
-        host_kernel_source: str | None = None
+        kernel_global_source: str | None = None
         kernel_params: list[KernelParam] | None = None
 
-        # Load optional device kernel source
         try:
+            wrapped_kernel_path = os.path.join(cache_path, WRAPPED_KERNEL_PATH)
             if verbose:
-                logger.debug(f"Loading kernel source code from file: {device_kernel_path}")
-            with open(device_kernel_path) as f:
-                device_kernel_source = f.read()
+                logger.debug(f"Loading wrapped kernel source code from file: {wrapped_kernel_path}")
+            with open(wrapped_kernel_path) as f:
+                kernel_global_source = f.read()
         except Exception as e:
-            logger.error(f"Error loading kernel source code from disk: {e}")
+            logger.error(f"Error loading wrapped kernel source code from disk: {e}")
 
-        # Load optional host kernel source
-        try:
-            if verbose:
-                logger.debug(f"Loading wrapped kernel source code from file: {host_kernel_path}")
-            with open(host_kernel_path) as f:
-                host_kernel_source = f.read()
-        except Exception as e:
-            logger.error(f"Error loading host kernel source code from disk: {e}")
+        kernel_lib_path = os.path.join(cache_path, KERNEL_LIB_PATH)
 
         # Load kernel parameters
         try:
+            params_path = os.path.join(cache_path, PARAMS_PATH)
             if verbose:
                 logger.debug(f"Loading kernel parameters from file: {params_path}")
-            with open(params_path) as f:
-                kernel_params = load_kernel_params(f.read())
+            with open(params_path, "rb") as f:
+                kernel_params = cloudpickle.load(f)
         except Exception as e:
             logger.error(f"Error loading kernel parameters from disk: {e}")
 
-        if host_kernel_source and device_kernel_source and kernel_params:
-            return JITKernel.from_database(
-                func=func,
-                host_kernel_source=CachedTextSource(text=host_kernel_source),
-                device_kernel_source=CachedTextSource(text=device_kernel_source),
-                kernel_lib_path=kernel_lib_path,
-                params=kernel_params,
-                target=backend_context.target,
-                target_host=backend_context.target_host,
-                out_idx=out_idx,
-                execution_backend=execution_backend,
-                pass_configs=pass_configs,
-                compile_flags=compile_flags,
-                backend_context=backend_context,
-            )
+        # Load auto_gm_idx (workspace reduction indices for runtime allocation).
+        # Missing for cache entries written before this file was persisted.
+        auto_gm_idx = []
+        auto_gm_idx_path = os.path.join(cache_path, AUTO_GM_IDX_PATH)
+        if os.path.exists(auto_gm_idx_path):
+            try:
+                with open(auto_gm_idx_path) as f:
+                    auto_gm_idx = json.load(f) or []
+            except Exception as e:
+                logger.error(f"Error loading auto_gm_idx from disk: {e}")
+
+        if kernel_global_source and kernel_params:
+            try:
+                return JITKernel.from_database(
+                    func=func,
+                    kernel_global_source=kernel_global_source,
+                    kernel_lib_path=kernel_lib_path,
+                    params=kernel_params,
+                    target=target,
+                    target_host=target_host,
+                    # Resolve "auto" to the concrete platform (respects TL_PLATFORM,
+                    # so sim-mode restores load the right simulator lib). workspace_idx
+                    # is not tracked by the auto-tuner (it compiles with the default).
+                    platform=determine_platform(platform),
+                    out_idx=out_idx,
+                    workspace_idx=None,
+                    auto_gm_idx=auto_gm_idx,
+                    execution_backend=execution_backend,
+                    pass_configs=pass_configs,
+                    compile_flags=compile_flags,
+                )
+            except PermissionError:
+                # The entry is present but unreadable; retuning would hit the
+                # same permission on the save path, so keep the original error.
+                raise
+            except OSError as error:
+                if not error_reports_missing_path(error, kernel_lib_path):
+                    # A dependency, ELF/ABI, or other loader error: not this cache
+                    # entry going missing, so preserve it.
+                    raise
+                if is_file_missing(kernel_lib_path):
+                    logger.warning(
+                        "Cached kernel library %s disappeared while loading; recompiling.",
+                        kernel_lib_path,
+                    )
+                    return None
+                raise
         else:
             return None
 
     def save_to_disk(self, path: Path, verbose: bool = False):
-        """Persist autotune result to disk using atomic directory rename.
-
-        All files are written into a temporary staging directory under the
-        shared namespace staging root. Once complete, the staging directory is
-        atomically renamed to *path* so that concurrent readers never see a
-        half-written result.
-        """
-        # Already saved (e.g. another process won the race with a complete entry).
-        if self._is_complete_result_dir(path, self.kernel.execution_backend):
+        try:
+            os.makedirs(path, exist_ok=True)
+        except FileNotFoundError:
+            logger.warning("Cache directory disappeared while saving tuning result; skipping save: %s", path)
             return
 
-        # Keep autotuner staging under the shared namespace staging root so stale cleanup
-        # never needs to scan the full cache directory.
-        staging_path = path.parent.parent / ".staging" / f"{Path(path).name}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
-        os.makedirs(staging_path)
-        # Ensure the parent of the final path exists (e.g. ~/.tilelang/cache/<namespace>/autotuner/)
-        os.makedirs(Path(path).parent, exist_ok=True)
-
+        # save best config
+        if verbose:
+            logger.debug(f"Saving best config to file: {path / BEST_CONFIG_PATH}")
         try:
-            # save best config
-            if verbose:
-                logger.debug(f"Saving best config to file: {staging_path / BEST_CONFIG_PATH}")
-            self._safe_write_file(str(staging_path / BEST_CONFIG_PATH), "w", lambda f: json.dump(self.config, f))
+            best_config_file = open(path / BEST_CONFIG_PATH, "w")
+        except FileNotFoundError:
+            logger.warning("Cache disappeared while saving tuning result; skipping save: %s", path)
+            return
+        with best_config_file:
+            json.dump(self.config, best_config_file)
 
-            # save function
-            if verbose:
-                logger.debug(f"Saving function to file: {staging_path / FUNCTION_PATH}")
-            self._safe_write_file(str(staging_path / FUNCTION_PATH), "wb", lambda f: cloudpickle.dump(self.func, f))
+        # save function
+        if verbose:
+            logger.debug(f"Saving function to file: {path / FUNCTION_PATH}")
+        try:
+            function_file = open(path / FUNCTION_PATH, "wb")
+        except FileNotFoundError:
+            logger.warning("Cache disappeared while saving tuning result; skipping save: %s", path)
+            return
+        with function_file:
+            cloudpickle.dump(self.func, function_file)
 
-            # save out idx
-            if verbose:
-                logger.debug(f"Saving out idx to file: {staging_path / OUT_IDX_PATH}")
-            self._safe_write_file(
-                str(staging_path / OUT_IDX_PATH),
-                "w",
-                lambda f: json.dump(
-                    {
-                        "out_idx": list(self.func.attrs["tilelang_out_idx"])
-                        if (self.func.attrs and "tilelang_out_idx" in self.func.attrs)
-                        else None,
-                    },
-                    f,
-                ),
+        # save ref latency
+        if verbose:
+            logger.debug(f"Saving latency to file: {path / LATENCY_PATH}")
+        try:
+            latency_file = open(path / LATENCY_PATH, "w")
+        except FileNotFoundError:
+            logger.warning("Cache disappeared while saving tuning result; skipping save: %s", path)
+            return
+        with latency_file:
+            json.dump(
+                {
+                    "latency": self.latency,
+                    "ref_latency": self.ref_latency,
+                },
+                latency_file,
             )
 
-            # save latency
-            if verbose:
-                logger.debug(f"Saving latency to file: {staging_path / LATENCY_PATH}")
-            self._safe_write_file(
-                str(staging_path / LATENCY_PATH),
-                "w",
-                lambda f: json.dump(
-                    {
-                        "latency": self.latency,
-                        "ref_latency": self.ref_latency,
-                    },
-                    f,
-                ),
-            )
-
-            # save kernel
-            self._save_kernel_to_disk(staging_path, self.kernel, verbose)
-
-            missing_files = self._get_missing_complete_result_files(staging_path, self.kernel.execution_backend)
-            if missing_files:
-                missing_names = ", ".join(path.name for path in missing_files)
-                raise RuntimeError(f"Incomplete autotune staging directory is missing required file(s): {missing_names}")
-
-            # Repair stale/incomplete entries before making the new directory visible.
-            self._remove_incomplete_result_dir(path, self.kernel.execution_backend)
-
-            # Durability barrier: keep the staged data ahead of the rename so a
-            # crash cannot publish a truncated cache entry.
-            for entry in os.scandir(staging_path):
-                if entry.is_file(follow_symlinks=False):
-                    with open(entry.path, "rb+") as staged_file:
-                        os.fsync(staged_file.fileno())
-
-            # Atomic rename — directory becomes visible in one step.
-            try:
-                os.rename(str(staging_path), str(path))
-            except OSError as exc:
-                if not self._is_rename_collision(exc):
-                    raise
-                # Another process won the race with a complete cache entry.
-                shutil.rmtree(str(staging_path), ignore_errors=True)
-        except Exception:
-            shutil.rmtree(str(staging_path), ignore_errors=True)
-            logger.exception("Error during atomic autotune result save")
+        # save kernel
+        self._save_kernel_to_disk(path, self.kernel)
 
     @classmethod
     def load_from_disk(cls, path: Path, compile_args: CompileArgs) -> AutotuneResult:
-        """Load a complete autotune result and its compiled kernel from disk."""
         if not os.path.exists(path):
             return None
 
         verbose = compile_args.verbose
-        from tilelang.backend.module import create_backend_context
-
-        requested_backend = compile_args.execution_backend
-        backend_context = create_backend_context(
-            compile_args.target,
-            compile_args.target_host,
-            requested_backend,
-        )
         # load best config
         if verbose:
             logger.debug(f"Loading best config from file: {path / BEST_CONFIG_PATH}")
-        with open(path / BEST_CONFIG_PATH) as f:
-            config = json.load(f)
+        try:
+            best_config_file = open(path / BEST_CONFIG_PATH)
+        except FileNotFoundError:
+            return None
+        with best_config_file:
+            config = json.load(best_config_file)
 
         # load function
         if verbose:
             logger.debug(f"Loading function from file: {path / FUNCTION_PATH}")
-        with open(path / FUNCTION_PATH, "rb") as f:
-            func = cloudpickle.load(f)
-
-        # load out idx (optional — older caches may not have this file)
-        out_idx_override = None
-        out_idx_file = path / OUT_IDX_PATH
-        if out_idx_file.exists():
-            if verbose:
-                logger.debug(f"Loading out idx from file: {out_idx_file}")
-            with open(out_idx_file) as f:
-                out_idx_override = json.load(f)["out_idx"]
+        try:
+            function_file = open(path / FUNCTION_PATH, "rb")
+        except FileNotFoundError:
+            return None
+        with function_file:
+            func = cloudpickle.load(function_file)
 
         # load latency
         if verbose:
             logger.debug(f"Loading latency from file: {path / LATENCY_PATH}")
-        with open(path / LATENCY_PATH) as f:
-            latency = json.load(f)
+        try:
+            latency_file = open(path / LATENCY_PATH)
+        except FileNotFoundError:
+            return None
+        with latency_file:
+            latency = json.load(latency_file)
             latency, ref_latency = latency["latency"], latency["ref_latency"]
 
         kernel = cls._load_kernel_from_disk(
             cls,
             path,
-            backend_context,
-            out_idx_override if out_idx_override is not None else compile_args.out_idx,
+            compile_args.target,
+            compile_args.target_host,
+            compile_args.out_idx,
+            compile_args.execution_backend,
             compile_args.pass_configs,
-            None,  # compile_flags not tracked here
             func,
+            compile_flags=compile_args.compile_flags,
+            platform=compile_args.platform,
         )
         if kernel is None:
             return None
@@ -562,62 +451,3 @@ class AutotuneResult:
             ref_latency=ref_latency,
         )
         return result
-
-    @staticmethod
-    def _get_kernel_lib_file(execution_backend: str) -> str:
-        """Return the cache filename for one backend's executable artifact."""
-        if execution_backend == "nvrtc":
-            return KERNEL_CUBIN_PATH
-        if execution_backend == "tvm_ffi":
-            return EXECUTABLE_PATH
-        if execution_backend == "cutedsl":
-            return KERNEL_PY_PATH
-        return KERNEL_LIB_PATH
-
-    @classmethod
-    def _get_required_kernel_files(cls, path: Path, execution_backend: str) -> list[Path]:
-        """Return backend-specific files required to reload a kernel."""
-        files = [path / cls._get_kernel_lib_file(execution_backend)]
-        if execution_backend == "nvrtc":
-            files.append(path / KERNEL_PY_PATH)
-        return files
-
-    @classmethod
-    def _get_complete_result_files(cls, path: Path, execution_backend: str) -> list[Path]:
-        """Return the full file set that marks an autotune result complete."""
-        return list(
-            dict.fromkeys(
-                [
-                    path / BEST_CONFIG_PATH,
-                    path / FUNCTION_PATH,
-                    path / LATENCY_PATH,
-                    path / DEVICE_KERNEL_PATH,
-                    path / HOST_KERNEL_PATH,
-                    *cls._get_required_kernel_files(path, execution_backend),
-                    path / PARAMS_PATH,
-                ]
-            )
-        )
-
-    @classmethod
-    def _get_missing_complete_result_files(cls, path: Path, execution_backend: str) -> list[Path]:
-        """Return complete-result files missing from a candidate cache path."""
-        return [file for file in cls._get_complete_result_files(path, execution_backend) if not file.exists()]
-
-    @classmethod
-    def _is_complete_result_dir(cls, path: Path, execution_backend: str) -> bool:
-        """Return whether a cache directory contains all required files."""
-        return path.is_dir() and not cls._get_missing_complete_result_files(path, execution_backend)
-
-    @classmethod
-    def _remove_incomplete_result_dir(cls, path: Path, execution_backend: str) -> bool:
-        """Remove a stale incomplete result directory when present."""
-        if not path.is_dir() or cls._is_complete_result_dir(path, execution_backend):
-            return False
-        shutil.rmtree(path)
-        return True
-
-    @staticmethod
-    def _is_rename_collision(exc: OSError) -> bool:
-        """Return whether a rename failure came from a benign race."""
-        return exc.errno in {errno.EEXIST, errno.ENOTEMPTY}

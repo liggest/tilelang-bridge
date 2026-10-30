@@ -85,7 +85,8 @@ def _get_current_stack() -> CaptureStack:
 
 
 class AutotuneInputsCapture:
-    __slots__ = "tensors"
+
+    __slots__ = ("tensors")
 
     def __init__(self, tensors: list[Any]):
         self.tensors = tensors

@@ -22,25 +22,42 @@
  * \brief Legalize the program from frontend
  */
 
-#include "support/check.h"
-#include <tvm/tirx/op.h>
-#include <tvm/tirx/stmt_functor.h>
-#include <tvm/tirx/transform.h>
+#include <tvm/tir/op.h>
+#include <tvm/tir/stmt_functor.h>
+#include <tvm/tir/transform.h>
 
 #include "arith/ir_mutator_with_analyzer.h"
 
 namespace tvm {
 namespace tl {
 
-using namespace tirx;
+using namespace tir;
 
-class LetInliner : public arith::IRMutatorWithAnalyzer {
+class SwizzleFinder : public StmtExprVisitor {
+public:
+  void VisitExpr_(const CallNode *op) {
+    if (op->op.same_as(builtin::call_extern())) {
+      std::string op_name = Downcast<StringImm>(op->args[0])->value;
+      if (op_name.find("thread_block_swizzle") != std::string::npos) {
+        use_swizzle_ = Bool(1);
+      }
+    }
+  }
+
+  Bool use_swizzle_ = Bool(0);
+};
+
+class FrontendLegalizer : public arith::IRMutatorWithAnalyzer {
 public:
   static PrimFunc Substitute(PrimFunc f) {
+    SwizzleFinder swizzle_finder;
+    swizzle_finder(f->body);
     arith::Analyzer analyzer;
-    LetInliner substituter(&analyzer);
+    FrontendLegalizer substituter(&analyzer);
     PrimFuncNode *fptr = f.CopyOnWrite();
     fptr->body = substituter.VisitStmt(f->body);
+    auto fn_attr = fptr->attrs.CopyOnWrite();
+    fn_attr->dict.Set("use_swizzle", swizzle_finder.use_swizzle_);
     return f;
   }
 
@@ -66,9 +83,9 @@ private:
     }
   }
 
-  Stmt VisitStmt_(const BindNode *node) final {
+  Stmt VisitStmt_(const LetStmtNode *node) final {
     let_bindings_[node->var.get()] = node->value;
-    return Evaluate(Integer(0));
+    return arith::IRMutatorWithAnalyzer::VisitStmt(node->body);
   }
 
   PrimExpr VisitExpr_(const LetNode *node) final {
@@ -80,19 +97,17 @@ private:
   std::unordered_map<const VarNode *, PrimExpr> let_bindings_;
 };
 
-using namespace tirx::transform;
+using namespace tir::transform;
 
-Pass LetInline() {
-  auto pass_func = [=](PrimFunc f, const IRModule &m, const PassContext &ctx) {
-    return LetInliner::Substitute(std::move(f));
+Pass FrontendLegalize() {
+  auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
+    return FrontendLegalizer::Substitute(std::move(f));
   };
-  return CreatePrimFuncPass(pass_func, 0, "tl.LetInline", {});
+  return CreatePrimFuncPass(pass_func, 0, "tl.FrontendLegalize", {});
 }
 
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tl.transform.LetInline", LetInline);
-}
+TVM_REGISTER_GLOBAL("tl.transform.FrontendLegalize")
+    .set_body_typed(FrontendLegalize);
 
 } // namespace tl
 } // namespace tvm

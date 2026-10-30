@@ -1,3 +1,5 @@
+// Copyright (c) Tile-AI Corporation.
+// Licensed under the MIT License.
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -22,18 +24,13 @@
  * \brief Common utilities for TL transforms
  */
 
-#include "support/check.h"
-#include <tvm/ir/cast.h>
-#include <tvm/runtime/logging.h>
-#include <tvm/s_tir/utils.h>
-#include <tvm/tirx/builtin.h>
-#include <tvm/tirx/op.h>
-#include <tvm/tirx/stmt.h>
-#include <tvm/tirx/stmt_functor.h>
-#include <tvm/tirx/transform.h>
+#include <tvm/tir/builtin.h>
+#include <tvm/tir/op.h>
+#include <tvm/tir/stmt_functor.h>
+#include <tvm/tir/transform.h>
+#include <tvm/tir/utils.h>
 
 #include <queue>
-#include <utility>
 
 #include "../../op/parallel.h"
 #include "../loop_partition.h"
@@ -43,8 +40,7 @@
 namespace tvm {
 namespace tl {
 
-using namespace tirx;
-using namespace ffi;
+using namespace tir;
 
 // Vectorize Part
 // Use the same code as tir.transform.vectorize_loop
@@ -92,7 +88,7 @@ inline PrimExpr BroadcastTo(PrimExpr e, int lanes, bool is_scalable) {
 class VecAllocAccess : public StmtExprMutator {
 public:
   VecAllocAccess(const VarNode *buf, Var var, PrimExpr var_lanes)
-      : buf_(buf), var_(std::move(var)), var_lanes_(std::move(var_lanes)) {}
+      : buf_(buf), var_(var), var_lanes_(var_lanes) {}
 
   PrimExpr VisitExpr_(const BufferLoadNode *op) final {
     auto load = Downcast<BufferLoad>(StmtExprMutator::VisitExpr_(op));
@@ -182,8 +178,7 @@ public:
   using ExprFunctor::VisitExpr;
   using StmtMutator::operator();
 
-  Vectorizer(const Var &var, const PrimExpr &var_lanes)
-      : var_(var), var_lanes_(var_lanes) {
+  Vectorizer(Var var, PrimExpr var_lanes) : var_(var), var_lanes_(var_lanes) {
     ramp_ = Ramp(IntImm(var->dtype, 0), IntImm(var->dtype, 1), var_lanes);
   }
 
@@ -203,13 +198,11 @@ public:
   }
 
   PrimExpr VisitExpr_(const AddNode *op) final {
-    return AddSubVec(
-        op, [](PrimExpr a, PrimExpr b) { return std::move(a) + std::move(b); });
+    return AddSubVec(op, [](PrimExpr a, PrimExpr b) { return a + b; });
   }
 
   PrimExpr VisitExpr_(const SubNode *op) final {
-    return AddSubVec(
-        op, [](PrimExpr a, PrimExpr b) { return std::move(a) - std::move(b); });
+    return AddSubVec(op, [](PrimExpr a, PrimExpr b) { return a - b; });
   }
 
   PrimExpr VisitExpr_(const MulNode *op) final {
@@ -343,34 +336,17 @@ public:
 
   PrimExpr VisitExpr_(const CastNode *op) final {
     PrimExpr value = this->VisitExpr(op->value);
-
-    // Vectorize PrimExpr values inside annotations (e.g. "rbits" for
-    // stochastic-rounding casts). Keys and non-PrimExpr values pass through
-    // unchanged.
-    ffi::Map<ffi::String, ffi::Any> new_annotations;
-    bool annotations_changed = false;
-    for (const auto &kv : op->annotations) {
-      if (auto opt = kv.second.as<PrimExpr>()) {
-        PrimExpr new_val = this->VisitExpr(opt.value());
-        new_annotations.Set(kv.first, new_val);
-        if (!new_val.same_as(opt.value()))
-          annotations_changed = true;
+    if (value.same_as(op->value)) {
+      return GetRef<PrimExpr>(op);
+    } else {
+      if (value.dtype().is_scalable_vector()) {
+        return Cast(op->dtype.with_scalable_vscale_factor(
+                        value.dtype().vscale_factor()),
+                    value);
       } else {
-        new_annotations.Set(kv.first, kv.second);
+        return Cast(op->dtype.with_lanes(value.dtype().lanes()), value);
       }
     }
-    if (value.same_as(op->value) && !annotations_changed) {
-      return tvm::ffi::GetRef<PrimExpr>(op);
-    }
-    DataType new_dtype = value.dtype().is_scalable_vector()
-                             ? op->dtype.with_scalable_vscale_factor(
-                                   value.dtype().vscale_factor())
-                             : op->dtype.with_lanes(value.dtype().lanes());
-    if (op->annotations.empty()) {
-      return Cast(new_dtype, value);
-    }
-    return Cast(new_dtype, value,
-                annotations_changed ? new_annotations : op->annotations);
   }
 
   PrimExpr VisitExpr_(const FloatImmNode *op) final {
@@ -507,7 +483,8 @@ public:
     Array<PrimExpr> indices = op->indices.Map(fmutate);
 
     if (!indices.same_as(op->indices)) {
-      return BufferLoad(op->buffer, indices, op->predicate, op->span);
+      auto writer = load.CopyOnWrite();
+      writer->indices = indices;
     }
 
     return std::move(load);
@@ -613,7 +590,7 @@ public:
       return GetRef<Stmt>(op);
     } else {
       return For(op->loop_var, op->min, extent, op->kind, body,
-                 op->thread_binding, op->annotations, op->step, op->span);
+                 op->thread_binding, op->annotations);
     }
   }
   // IfThenElse
@@ -624,7 +601,7 @@ public:
       return Scalarize(GetRef<Stmt>(op));
     }
     Stmt then_case = this->VisitStmt(op->then_case);
-    Optional<Stmt> else_case = std::nullopt;
+    Optional<Stmt> else_case = NullOpt;
     if (op->else_case) {
       else_case = this->VisitStmt(op->else_case.value());
     }
@@ -640,7 +617,7 @@ public:
     LOG(FATAL) << "A while loop inside a vectorized loop not supported.";
   }
   // LetStmt
-  Stmt VisitStmt_(const BindNode *op) final {
+  Stmt VisitStmt_(const LetStmtNode *op) final {
     PrimExpr value = this->VisitExpr(op->value);
     ICHECK(!let_binding_.count(op->var))
         << "SSA violation, a single var is binded twice";
@@ -650,40 +627,54 @@ public:
         op->value.dtype().get_lanes_or_vscale_factor()) {
       Var new_var(op->var->name_hint, value.dtype());
       let_binding_[op->var] = new_var;
-      return Bind(new_var, value);
+      return LetStmt(new_var, value, this->VisitStmt(op->body));
     } else {
       let_binding_[op->var] = op->var;
-      if (value.same_as(op->value)) {
+      Stmt body = this->VisitStmt(op->body);
+      if (value.same_as(op->value) && body.same_as(op->body)) {
         return GetRef<Stmt>(op);
       } else {
-        return Bind(op->var, value);
+        return LetStmt(op->var, value, body);
       }
     }
   }
   // Allocate
-  Stmt VisitStmt_(const AllocBufferNode *op) final {
+  Stmt VisitStmt_(const AllocateNode *op) final {
+    // Mutate the condition
+    PrimExpr condition = this->VisitExpr(op->condition);
+    if (condition.dtype().is_scalable_or_fixed_length_vector()) {
+      LOG(WARNING) << "Cannot handle vector extent in alloc of "
+                   << op->buffer_var->name_hint;
+      return Scalarize(GetRef<Stmt>(op));
+    }
+
     // Mutate the extents
     Array<PrimExpr> extents;
-    for (const auto &extent : op->buffer->shape) {
+    for (const auto &extent : op->extents) {
       PrimExpr new_ext = this->VisitExpr(extent);
       if (new_ext.dtype().is_scalable_or_fixed_length_vector()) {
         LOG(WARNING) << "Cannot handle vector extent in alloc of "
-                     << op->buffer->data->name_hint;
+                     << op->buffer_var->name_hint;
         return Scalarize(GetRef<Stmt>(op));
       }
       extents.push_back(new_ext);
     }
+
+    // TODO(Lunderberg): Move this pass to be prior to
+    // StorageFlatten/FlattenBuffer.  That will allow this pass to be
+    // implemented as adding a new buffer dimension, which is later
+    // flattened.
 
     // Extend the least significant dimension by a factor of
     // var_lanes_.  Typically, this will be a 1-d index into a flat
     // memory space.
     extents.Set(extents.size() - 1, extents[extents.size() - 1] * var_lanes_);
 
-    // Create new buffer with extended shape
-    Buffer new_buf(op->buffer->data, op->buffer->dtype, extents,
-                   op->buffer->strides, op->buffer->elem_offset,
-                   op->buffer->data->name_hint, 0, 0, kDefault);
-    return AllocBuffer(new_buf, op->annotations);
+    // Rewrite access to the buffer in the body.
+    Stmt body =
+        VecAllocAccess(op->buffer_var.get(), var_, var_lanes_)(op->body);
+    body = this->VisitStmt(body);
+    return Allocate(op->buffer_var, op->dtype, extents, condition, body);
   }
 
   // scalarize the statement
@@ -691,6 +682,10 @@ public:
     Var idx(var_->name_hint + ".s", var_->dtype);
     stmt = Substitute(stmt, {{var_, idx}});
     return For(idx, IntImm(var_->dtype, 0), var_lanes_, ForKind::kSerial, stmt);
+  }
+  // ProducerStore
+  Stmt VisitStmt_(const ProducerStoreNode *op) final {
+    LOG(FATAL) << "ProducerProvide cannot appear in a TIR PrimFunc";
   }
 
 private:
@@ -715,7 +710,7 @@ private:
   // mutate array, with given lane requirement
   // when finished, p_lane updates the lane requirement.
   Array<PrimExpr> MutateArray(Array<PrimExpr> arr, int *p_lanes) {
-    if (arr.empty())
+    if (arr.size() == 0)
       return arr;
     int &lanes = *p_lanes;
     bool changed = false;

@@ -1,13 +1,18 @@
+# Copyright (c) Tile-AI Corporation.
+# Licensed under the MIT License.
 """Rasteration Plan For L2 Cache Locality"""
+
+from typing import List
 
 
 class Rasterization:
+
     panel_width_ = None
 
     def __init__(self) -> None:
         pass
 
-    def get_code(self) -> list[str]:
+    def get_code(self) -> List[str]:
         raise NotImplementedError()
 
     @property
@@ -17,13 +22,14 @@ class Rasterization:
 
 
 class NoRasterization(Rasterization):
+
     def __init__(self) -> None:
         super().__init__()
 
     def __repr__(self) -> str:
         return "<NoRasterization>"
 
-    def get_code(self) -> list[str]:
+    def get_code(self) -> List[str]:
         return []
 
 
@@ -43,7 +49,7 @@ class Rasterization2DRow(Rasterization):
     def __repr__(self) -> str:
         return f"<Rasterization2DRow({self.panel_width_})>"
 
-    def get_code(self) -> list[str]:
+    def get_code(self) -> List[str]:
         raise NotImplementedError()
 
 
@@ -74,16 +80,16 @@ __device__ __inline__ dim3 rasterization2DColumn(const int panel_width) {
     const auto bx = (panelIdx & 1) ? gridDim.x -(baseBlockIdx - panelIdx * panel_width * gridDim.x) /strideLd - 1 : (baseBlockIdx - panelIdx * panel_width *gridDim.x) / strideLd;
     const auto by = (baseBlockIdx - panelIdx * panel_width *gridDim.x) % strideLd + panelIdx * panel_width;
     const auto bz = blockIdx.z;
-
+    
     dim3 blockIdx(bx, by, bz);
     return blockIdx;
 }
     """
 
-    def get_code(self, panel_width: int = None) -> list[str]:
+    def get_code(self, panel_width: int = None) -> List[str]:
         if panel_width is None:
             panel_width = self.panel_width_
         return [
             self.get_device_function(),
-            f"const dim3 blockIdx = rasterization2DColumn({panel_width});\n",
+            "const dim3 blockIdx = rasterization2DColumn({});\n".format(panel_width),
         ]

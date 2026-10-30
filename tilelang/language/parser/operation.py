@@ -18,15 +18,17 @@
 # which is part of the TVM project (https://tvm.apache.org/).
 """The tir expression operation registration"""
 
-from tvm import tirx
-from tvm.ffi.runtime_ctypes import DataType, DataTypeCode
-from tvm.tirx import IntImm
-from tvm.tirx.expr import FloatImm
+from typing import Type
+
+from tvm import tir
+from tvm._ffi.runtime_ctypes import DataType, DataTypeCode
+from tvm.tir import IntImm
+from tvm.tir.expr import FloatImm
 
 from tvm.script.parser._core import OpMethod, doc, register_op
 
 
-def _register_expr_op(ty: type):  # pylint: disable=invalid-name
+def _register_expr_op(ty: Type):  # pylint: disable=invalid-name
     ty._dispatch_type = ty  # pylint: disable=protected-access
 
     def _and(a, b):
@@ -37,7 +39,7 @@ def _register_expr_op(ty: type):  # pylint: disable=invalid-name
         if DataType(a.dtype).lanes > 1 or DataType(b.dtype).lanes > 1:
             return a & b
         else:
-            return tirx.And(a, b)
+            return tir.And(a, b)
 
     def _or(a, b):
         if isinstance(a, bool):
@@ -47,7 +49,7 @@ def _register_expr_op(ty: type):  # pylint: disable=invalid-name
         if DataType(a.dtype).lanes > 1 or DataType(b.dtype).lanes > 1:
             return a | b
         else:
-            return tirx.Or(a, b)
+            return tir.Or(a, b)
 
     def _get_type_str(dtype: str):
         if DataType(dtype).lanes == 1:
@@ -56,9 +58,11 @@ def _register_expr_op(ty: type):  # pylint: disable=invalid-name
         return dtype[0:index]
 
     def _auto_broadcast(a, b, op):
+
         if isinstance(a, int):
             if hasattr(b, "dtype"):
-                if DataType(b.dtype).type_code == DataTypeCode.INT or DataType(b.dtype).type_code == DataTypeCode.UINT:
+                if (DataType(b.dtype).type_code == DataTypeCode.INT or
+                        DataType(b.dtype).type_code == DataTypeCode.UINT):
                     a = IntImm(_get_type_str(b.dtype), a)
                 elif DataType(b.dtype).type_code == DataTypeCode.FLOAT:
                     a = FloatImm(_get_type_str(b.dtype), a)
@@ -72,9 +76,10 @@ def _register_expr_op(ty: type):  # pylint: disable=invalid-name
             else:
                 a = FloatImm("float32", a)
 
-        assert isinstance(a, tirx.PrimExpr), "Operand should be a PrimExpr."
+        assert isinstance(a, tir.PrimExpr), "Operand should be a PrimExpr."
         if isinstance(b, int):
-            if DataType(a.dtype).type_code == DataTypeCode.INT or DataType(a.dtype).type_code == DataTypeCode.UINT:
+            if (DataType(a.dtype).type_code == DataTypeCode.INT or
+                    DataType(a.dtype).type_code == DataTypeCode.UINT):
                 b = IntImm(_get_type_str(a.dtype), b)
             elif DataType(a.dtype).type_code == DataTypeCode.FLOAT:
                 b = FloatImm(_get_type_str(a.dtype), b)
@@ -84,33 +89,33 @@ def _register_expr_op(ty: type):  # pylint: disable=invalid-name
         if DataType(a.dtype).lanes == DataType(b.dtype).lanes:
             return op(a, b)
         elif DataType(a.dtype).lanes == 1 and DataType(a.dtype).lanes != DataType(b.dtype).lanes:
-            broadcast_a = tirx.Broadcast(a, DataType(b.dtype).lanes)
+            broadcast_a = tir.Broadcast(a, DataType(b.dtype).lanes)
             return op(broadcast_a, b)
         elif DataType(b.dtype).lanes == 1 and DataType(a.dtype).lanes != DataType(b.dtype).lanes:
-            broadcast_b = tirx.Broadcast(b, DataType(a.dtype).lanes)
+            broadcast_b = tir.Broadcast(b, DataType(a.dtype).lanes)
             return op(a, broadcast_b)
         else:
             raise TypeError("do not know how to deal with it.")
 
     def _eq(a, b):
-        return _auto_broadcast(a, b, tirx.EQ)
+        return _auto_broadcast(a, b, tir.EQ)
 
     def _ne(a, b):
-        return _auto_broadcast(a, b, tirx.NE)
+        return _auto_broadcast(a, b, tir.NE)
 
     def _lt(a, b):
-        return _auto_broadcast(a, b, tirx.LT)
+        return _auto_broadcast(a, b, tir.LT)
 
     def _le(a, b):
-        return _auto_broadcast(a, b, tirx.LE)
+        return _auto_broadcast(a, b, tir.LE)
 
     def _gt(a, b):
-        return _auto_broadcast(a, b, tirx.GT)
+        return _auto_broadcast(a, b, tir.GT)
 
     def _ge(a, b):
-        return _auto_broadcast(a, b, tirx.GE)
+        return _auto_broadcast(a, b, tir.GE)
 
-    def r(op: type, i: int, m: OpMethod):  # pylint: disable=invalid-name
+    def r(op: Type, i: int, m: OpMethod):  # pylint: disable=invalid-name
         register_op(ty, op, i)(m)
 
     for i in [0, 1]:
@@ -145,10 +150,10 @@ def _register_expr_op(ty: type):  # pylint: disable=invalid-name
     for i in [0]:
         #  Case 4. unaryop
         # doc.Invert <-- is overloaded
-        r(doc.Not, i, tirx.Not)
+        r(doc.Not, i, tir.Not)
         # doc.UAdd <-- is overloaded
         # doc.USub <-- is overloaded
 
 
-_register_expr_op(tirx.PrimExpr)
-_register_expr_op(tirx.IterVar)
+_register_expr_op(tir.PrimExpr)
+_register_expr_op(tir.IterVar)

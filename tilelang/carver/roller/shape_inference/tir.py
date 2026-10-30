@@ -1,11 +1,15 @@
-from collections.abc import Mapping
-from tvm.s_tir.schedule import SBlockRV
+# Copyright (c) Tile-AI Corporation.
+# Licensed under the MIT License.
+
+from typing import Dict, List, Tuple, Set, Mapping
+from tvm.tir.schedule.schedule import BlockRV
 from tvm.ir import structural_equal
-from tvm import arith, tirx
+from tvm import arith, tir
 
 
 class Statement:
-    def __init__(self, block_analyzer, block: SBlockRV):
+
+    def __init__(self, block_analyzer, block: BlockRV):
         self.block_analyzer = block_analyzer
         self.block = block
         # assume one tir block only has one output buffer
@@ -14,13 +18,15 @@ class Statement:
 
         self.reverse_bound_inference = {}
 
-    def make_reverse(self, input_name: str, input_iter: list[tirx.PrimExpr]):
+    def make_reverse(self, input_name: str, input_iter: List[tir.PrimExpr]):
         if len(self.block_analyzer.get_reduce_axis(self.block)) > 0:
             return None
         if len(self.dependent_region[input_name]) != 1:
             return None
         indices = self.dependent_region[input_name][0]
-        iter_map_range = {_iter.var: _iter.dom for _iter in self.block_analyzer.get_spatial_axis(self.block)}
+        iter_map_range = {
+            _iter.var: _iter.dom for _iter in self.block_analyzer.get_spatial_axis(self.block)
+        }
         iter_map_result = arith.detect_iter_map(
             indices,
             iter_map_range,
@@ -36,7 +42,7 @@ class Statement:
                 output_indices.append(results[_iter.var])
             else:
                 # not Bijective mapping case
-                output_indices.append(tirx.Var("undefined", dtype="int32") % int(_iter.dom.extent))
+                output_indices.append(tir.Var("undefined", dtype="int32") % int(_iter.dom.extent))
         return output_indices
 
 
@@ -44,7 +50,7 @@ def _merge_two_bounds(x: arith.ConstIntBound, y: arith.ConstIntBound):
     return arith.ConstIntBound(min(x.min_value, y.min_value), max(x.max_value, y.max_value))
 
 
-class TensorDepNode:
+class TensorDepNode(object):
     """
     For tensor dependency analysis.
     """
@@ -73,7 +79,8 @@ class TensorDepNode:
         return self.name
 
 
-class DependencyAnalysis:
+class DependencyAnalysis(object):
+
     def __init__(self, deps):
         self.deps = deps
         # issue: duplicate name when we have two same ops.
@@ -85,7 +92,7 @@ class DependencyAnalysis:
         This is a workaround for the issue that we have two same ops' fuse case.
         See https://github.com/apache/tvm/issues/16433
         """
-        _names: set = set()
+        _names: Set = set()
         name2dep: Mapping = {}
         for dep in deps:
             output_buffer = dep.block_analyzer.get_output_buffers(dep.block)[0]
@@ -108,14 +115,15 @@ class DependencyAnalysis:
 
     def traverse_dependencies(self, compute):
         if isinstance(compute, Statement):
-            node = self.get_or_create_node(compute.block_analyzer.get_output_buffers(compute.block)[0].name)
+            node = self.get_or_create_node(
+                compute.block_analyzer.get_output_buffers(compute.block)[0].name)
             # Loop through input tensors
             for input_buffer in compute.block_analyzer.get_input_buffers(compute.block):
                 # Get the input node
                 input_node = self.traverse_dependencies(input_buffer)
                 input_node.add_next(node)
                 node.add_prev(input_node)
-        elif isinstance(compute, tirx.Buffer):
+        elif isinstance(compute, tir.Buffer):
             node = self.get_or_create_node(compute.name)
         return node
 
@@ -162,7 +170,8 @@ class DependencyAnalysis:
 
 
 class InputShapeInference:
-    def __init__(self, deps: list[Statement]):
+
+    def __init__(self, deps: List[Statement]):
         self.deps = deps
         self.target_mapping = {}
         self.buffer_mapping = {}
@@ -173,15 +182,20 @@ class InputShapeInference:
         self.dep_analysis = DependencyAnalysis(self.deps)
         self.dep_analysis.analyze()
 
-    def construct_dependency_target(self, targets: tuple[str]):
+    def construct_dependency_target(self, targets: Tuple[str]):
         if targets in self.target_mapping:
             return self.target_mapping[targets]
         # should be buffer name instead of block name
-        name2dep = {dep.block_analyzer.get_output_buffers(dep.block)[0].name: dep for dep in self.deps}
+        name2dep = {
+            dep.block_analyzer.get_output_buffers(dep.block)[0].name: dep for dep in self.deps
+        }
         mapping = {}
         input_vars = []
         for target in targets:
-            vars = [iter.var for iter in name2dep[target].block_analyzer.get_spatial_axis(name2dep[target].block)]
+            vars = [
+                iter.var
+                for iter in name2dep[target].block_analyzer.get_spatial_axis(name2dep[target].block)
+            ]
             input_vars.append(vars)
             mapping[target] = [vars]
         ana = arith.Analyzer()
@@ -210,8 +224,13 @@ class InputShapeInference:
                     mapping[input_name] = []
                 for indices in indices_list:
                     for region in regions:
-                        vmap = {k: (tirx.Cast(k.dtype, v) if v.dtype != k.dtype else v) for k, v in zip(ax_vars, indices)}
-                        region = [ana.simplify(tirx.stmt_functor.substitute(ax, vmap)) for ax in region]
+                        vmap = {
+                            k: (tir.Cast(k.dtype, v) if v.dtype != k.dtype else v)
+                            for k, v in zip(ax_vars, indices)
+                        }
+                        region = [
+                            ana.simplify(tir.stmt_functor.substitute(ax, vmap)) for ax in region
+                        ]
                         if not region_exist_in_list(region, mapping[input_name]):
                             mapping[input_name].append(region)
         buffers = []
@@ -225,7 +244,10 @@ class InputShapeInference:
         self.target_mapping[targets] = input_vars, mapping
         return input_vars, mapping
 
-    def infer(self, shape: dict[str, list[arith.ConstIntBound]], rstep: dict[str, int] = None, targets=None):
+    def infer(self,
+              shape: Dict[str, List[arith.ConstIntBound]],
+              rstep: Dict[str, int] = None,
+              targets=None):
         if rstep is None:
             rstep = {}
         compute_targets = tuple(shape.keys())
@@ -239,7 +261,8 @@ class InputShapeInference:
         for ax in self.reduce_axes:
             # assume the dom.min is always 0, maybe we can extend the IterInfo to include the min value.
             if ax.var.name in rstep:
-                bound = arith.ConstIntBound(int(ax.dom.min), int(ax.dom.min + min(ax.dom.extent, rstep[ax.var.name]) - 1))
+                bound = arith.ConstIntBound(
+                    int(ax.dom.min), int(ax.dom.min + min(ax.dom.extent, rstep[ax.var.name]) - 1))
             else:
                 bound = arith.ConstIntBound(int(ax.dom.min), int(ax.dom.min + ax.dom.extent - 1))
             ana.update(ax.var, bound, True)
@@ -286,19 +309,22 @@ class InputShapeInference:
         for vars, exprs in zip(input_vars, output_exprs.values()):
             for var, expr in zip(vars, exprs):
                 if expr.dtype != var.dtype:
-                    expr = tirx.Cast(var.dtype, expr)
+                    expr = tir.Cast(var.dtype, expr)
                 vmap[var] = expr
         result = {}
 
         for name, regions in mapping.items():
             region = regions[0]
-            result[name] = [ana.simplify(tirx.stmt_functor.substitute(index, vmap)) for index in region]
+            result[name] = [
+                ana.simplify(tir.stmt_functor.substitute(index, vmap)) for index in region
+            ]
         return result
 
 
 def region_exist_in_list(a, list) -> bool:
+
     def expr_is_same(a, b) -> bool:
-        if isinstance(a, tirx.IntImm) and isinstance(b, tirx.IntImm):
+        if isinstance(a, tir.IntImm) and isinstance(b, tir.IntImm):
             return a.value == b.value
         return structural_equal(a, b)
 
@@ -309,34 +335,34 @@ def region_exist_in_list(a, list) -> bool:
 
 
 def walk_indice(expr):
-    if isinstance(expr, tirx.expr.BinaryOpExpr):
+    if isinstance(expr, tir.expr.BinaryOpExpr):
         a = walk_indice(expr.a)
         b = walk_indice(expr.b)
         if a is not None and b is not None:
             return expr
         else:
             return None
-    elif isinstance(expr, (tirx.Var, tirx.expr.ConstExpr)):
+    elif isinstance(expr, (tir.Var, tir.expr.ConstExpr)):
         return expr
-    elif isinstance(expr, tirx.ProducerLoad):
+    elif isinstance(expr, tir.ProducerLoad):
         return None
-    elif isinstance(expr, tirx.Cast):
+    elif isinstance(expr, tir.Cast):
         a = walk_indice(expr.value)
         if a is not None:
             return expr
         return None
-    elif isinstance(expr, tirx.Call):
+    elif isinstance(expr, tir.Call):
         return None
     else:
-        raise Exception(f"Unhandled node type in walk_indice(): {expr}")
+        raise Exception("Unhandled node type in walk_indice(): %s" % expr)
 
 
-def _extract_dependent_region(block_analyzer, block: SBlockRV) -> dict[str, list[tirx.PrimExpr]]:
+def _extract_dependent_region(block_analyzer, block: BlockRV) -> Dict[str, List[tir.PrimExpr]]:
     input_buffers = block_analyzer.get_input_buffers(block)
     dependent_region = {buffer.name: [] for buffer in input_buffers}
 
     def fvisit(x):
-        if not isinstance(x, tirx.BufferLoad):
+        if not isinstance(x, tir.BufferLoad):
             return
         if x.buffer.name not in dependent_region:
             return
@@ -344,8 +370,8 @@ def _extract_dependent_region(block_analyzer, block: SBlockRV) -> dict[str, list
         for indice, shape_limit in zip(x.indices, x.buffer.shape):
             expr = walk_indice(indice)
             if expr is None:
-                expr = tirx.Var("undefined", dtype="int8") % shape_limit
-            if isinstance(expr, tirx.IntImm) and expr.value == 0:
+                expr = tir.Var("undefined", dtype="int8") % shape_limit
+            if isinstance(expr, tir.IntImm) and expr.value == 0:
                 """for tensor ir zero dim smplification case.
                 for ax0, ax1, ax2 in T.grid(T.int64(1024), T.int64(1024), T.int64(1024)):
                     with T.block("T_dense"):
@@ -363,7 +389,7 @@ def _extract_dependent_region(block_analyzer, block: SBlockRV) -> dict[str, list
             dependent_region[x.buffer.name].append(index)
 
     stmt = block_analyzer.sch.get(block)
-    tirx.stmt_functor.post_order_visit(stmt, fvisit=fvisit)
+    tir.stmt_functor.post_order_visit(stmt, fvisit=fvisit)
     return dependent_region
 
 

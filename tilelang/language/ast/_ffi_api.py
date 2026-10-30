@@ -17,7 +17,6 @@
 # This file is modified from the original version,
 # which is part of the TVM project (https://tvm.apache.org/).
 """FFI APIs"""
+import tvm._ffi
 
-import tvm.ffi
-
-tvm.ffi._init_api("script.ir_builder.tirx", __name__)  # pylint: disable=protected-access
+tvm._ffi._init_api("script.ir_builder.tir", __name__)  # pylint: disable=protected-access

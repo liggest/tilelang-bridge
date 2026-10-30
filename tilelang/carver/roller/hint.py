@@ -1,6 +1,8 @@
+# Copyright (c) Tile-AI Corporation.
+# Licensed under the MIT License.
 """Hint definition for schedule"""
-
 from tvm import DataType
+from typing import Dict, List, Tuple
 from . import PrimFuncNode
 import numpy as np
 from .rasterization import *
@@ -13,17 +15,17 @@ class TensorCoreExtraConfig:
 
     def __init__(
         self,
-        AS_shape: tuple[int],
-        BS_shape: tuple[int],
-        AF_shape: tuple[int],
-        BF_shape: tuple[int],
-        tc_axis: tuple[int],
+        AS_shape: Tuple[int],
+        BS_shape: Tuple[int],
+        AF_shape: Tuple[int],
+        BF_shape: Tuple[int],
+        tc_axis: Tuple[int],
     ) -> None:
-        self.AS_shape: tuple[int] = AS_shape
-        self.BS_shape: tuple[int] = BS_shape
-        self.AF_shape: tuple[int] = AF_shape
-        self.BF_shape: tuple[int] = BF_shape
-        self.tc_axis: tuple[int] = tc_axis
+        self.AS_shape: Tuple[int] = AS_shape
+        self.BS_shape: Tuple[int] = BS_shape
+        self.AF_shape: Tuple[int] = AF_shape
+        self.BF_shape: Tuple[int] = BF_shape
+        self.tc_axis: Tuple[int] = tc_axis
 
 
 class Stride:
@@ -45,7 +47,7 @@ class Stride:
     def stride(self) -> int:
         return self._stride
 
-    def compute_strides_from_shape(self, shape: list[int]) -> list[int]:
+    def compute_strides_from_shape(self, shape: List[int]) -> List[int]:
         ndim = len(shape)
         strides = [1 for _ in shape]
         for i in range(ndim - 2, -1, -1):
@@ -55,13 +57,13 @@ class Stride:
                 strides[i] = int(strides[i + 1] * shape[i + 1])
         return strides
 
-    def compute_elements_from_shape(self, shape: list[int]) -> int:
+    def compute_elements_from_shape(self, shape: List[int]) -> int:
         original_shape = np.prod(shape)
         if not self.is_valid():
             strided_elem = original_shape
         else:
             assert self.ax < len(shape)
-            strided_elem = np.prod(shape[0 : self.ax + 1]) * self.stride
+            strided_elem = np.prod(shape[0:self.ax + 1]) * self.stride
             assert strided_elem >= original_shape
         return int(strided_elem)
 
@@ -94,10 +96,10 @@ class TileDict:
         self.grid_size = -1
         self.valid = True
 
-    def get_tile(self, func) -> list[int]:
+    def get_tile(self, func) -> List[int]:
         return self.tile_map[func]
 
-    def get_rstep(self, node) -> dict[str, int]:
+    def get_rstep(self, node) -> Dict[str, int]:
         return self.rstep_map[node]
 
     def __hash__(self) -> int:
@@ -125,11 +127,7 @@ class IntrinInfo:
         self.weight_transform_kind = weight_transform_kind
 
     def __repr__(self) -> str:
-        return (
-            f"<IntrinInfo, in_dtype={self.in_dtype}, out_dtype={self.out_dtype}, "
-            f"trans_b={self.trans_b}, input_transform_kind={self.input_transform_kind}, "
-            f"weight_transform_kind={self.weight_transform_kind}>"
-        )
+        return f"<IntrinInfo, {self.in_dtype}, {self.out_dtype}, {self.trans_b}, {self.propagate_b}>"
 
     def is_input_8bit(self) -> bool:
         return DataType(self.in_dtype).bits == 8
@@ -151,7 +149,7 @@ class IntrinInfo:
         return self.weight_transform_kind >= 1
 
 
-class Hint:
+class Hint(object):
     """
     Central configuration class for managing various parameters of computational tasks.
     """
@@ -182,15 +180,15 @@ class Hint:
         # Experimental
         self._raxis_order = []
         self._step = []
-        self.vectorize: dict[str, int] = {}
+        self.vectorize: Dict[str, int] = {}
         self.pipeline_stage = 1
         self.use_async = False
-        self.opt_shapes: dict[str, int] = {}
+        self.opt_shapes: Dict[str, int] = {}
         self.intrin_info = IntrinInfo("float16", "float16", True)
         self.shared_scope: str = "shared"
-        self.pass_context: dict = {}
+        self.pass_context: Dict = {}
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict:
         dic = {}
         dic["block"] = self.block
         if self.use_tc:
@@ -222,7 +220,7 @@ class Hint:
         return dic
 
     @classmethod
-    def from_dict(cls, dic: dict) -> "Hint":
+    def from_dict(cls, dic: Dict) -> "Hint":
         hint = cls()
         for k, v in dic.items():
             setattr(hint, k, v)
@@ -235,13 +233,13 @@ class Hint:
         return self
 
     @property
-    def raxis_order(self) -> list[int]:
+    def raxis_order(self) -> List[int]:
         if self._raxis_order != []:
             return self._raxis_order
         return list(range(len(self.rstep)))
 
     @property
-    def step(self) -> list[int]:
+    def step(self) -> List[int]:
         if self._step != []:
             return self._step
         return [1 for _ in self.block]
@@ -258,5 +256,5 @@ class Hint:
         # Always merge dynamic shared memory
         if self.shared_scope == "shared.dyn":
             merge_static_smem = True
-        self.pass_context = {"tirx.merge_static_smem": merge_static_smem}
+        self.pass_context = {"tir.merge_static_smem": merge_static_smem}
         return self
