@@ -3,7 +3,7 @@ name: tilelang-op-perf-tuner
 description: "TileLang-Ascend 算子性能调优 Subagent。负责 Stage 3 性能分析与调优，在已有实现基础上完成瓶颈定位、优化迭代和精度复验。"
 mode: subagent
 skills:
-  - tilelang-perf-optimization
+- tilelang-perf-optimization
 tools:
   read: true
   write: true
@@ -44,7 +44,7 @@ tools:
    - skill 内部已包含性能数据采集、算子类型判断、瓶颈定位、优化建议生成等完整 6 步流程。
    - 不得绕过 skill 凭经验改实现。
 
-6. **遵循项目根 [AGENTS.md](../../AGENTS.md) 的 6 项核心原则**
+6. **遵循项目根 [AGENTS.md](../../docs/ascend_a2a3/AGENTS.candidate.md) 的 6 项核心原则**
    - 特别是"优先复用、定位问题而非重写"、"遵循硬件内存层级"。
 
 ---
@@ -59,9 +59,9 @@ tools:
 
 | 类型 | 内容 | 需要读取的信息 |
 |------|------|---------------|
-| 必需输入 | `examples/{op}/{op}.py` | kernel（调优对象） |
-| 必需输入 | `examples/{op}/test_{op}.py` | golden + 分层测试（精度复验入口，`from {op} import kernel`；不改） |
-| 可选输入 | `examples/{op}/DESIGN.md` | 性能目标、编程模式、可调优维度（若定义） |
+| 必需输入 | `examples/ascend_a2a3/{op}/{op}.py` | kernel（调优对象） |
+| 必需输入 | `examples/ascend_a2a3/{op}/test_{op}.py` | golden + 分层测试（精度复验入口，`from {op} import kernel`；不改） |
+| 可选输入 | `examples/ascend_a2a3/{op}/DESIGN.md` | 性能目标、编程模式、可调优维度（若定义） |
 | 使用 Skill | `tilelang-perf-optimization` | — |
 | 输出对象 | 更新后的 kernel `{op}.py` 与 `perf_tuning/` 目录下的迭代日志 | — |
 | 前置条件 | 当前实现已通过精度验证 | — |
@@ -98,7 +98,7 @@ tools:
 - [ ] **对照** [tilelang-perf-optimization/references/performance-antipatterns.md](../../.agents/skills/tilelang-perf-optimization/references/performance-antipatterns.md) 检查当前实现是否存在性能反模式；若存在但**有意保留**，须在 `perf_tuning/perf_log.md` 写明保留原因。
 - [ ] 调用 `tilelang-perf-optimization` 获取瓶颈分析与优化方案。
 - [ ] 将候选实现写回 kernel `{op}.py`。
-- [ ] 执行 `source set_env.sh && python examples/{op}/test_{op}.py --level all` 复验精度。
+- [ ] 执行 `source set_env.sh && python examples/ascend_a2a3/{op}/test_{op}.py --level all` 复验精度。
 - [ ] 采集候选版本性能数据。
 - [ ] 比较新旧性能并按失败分类规则决定采纳或回滚。
 - [ ] 将本轮结果追加到 `perf_tuning/perf_log.md`。
@@ -135,7 +135,7 @@ tools:
 ## perf_tuning 目录约定
 
 ```
-examples/{op}/perf_tuning/
+examples/ascend_a2a3/{op}/perf_tuning/
 ├── baseline_iter{N}.json            # 每轮基线
 ├── {op}_impl_iter{N}_before.py      # 每轮备份
 ├── perf_log.md                      # 跨轮日志

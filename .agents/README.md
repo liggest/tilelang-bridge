@@ -1,3 +1,9 @@
+# 主线技能与 TA A2/A3 来源技能
+
+现有 main backend/build/dev-guide/tvm-ir/layout/semantic/A5 等技能逐字保持；此页后续保留 TA 原工作流并适配 A2/A3路径。先读 [迁移指南](../docs/ascend_a2a3/migration.md) 和 [21项技能状态](../docs/ascend_a2a3/skills.md)。A2/A3使用tilelang.ascend.a2a3.language，A5使用tilelang.ascend.language。
+
+根AGENTS尚未从TA直接激活；[合并候选](../docs/ascend_a2a3/AGENTS.candidate.md)与原文供专审。下面的OpenCode流程只用于明确的TA A2/A3新kernel任务；不覆盖main编译器开发或重复已有用户授权。旧A5sim转换资产标为来源参考，不能据它宣称A2sim或当前A5执行已验收。
+
 # TileLang-Ascend OpenCode 工作流
 
 通过 AI 代理与专家技能，自动完成华为昇腾 NPU 上的 TileLang 算子开发全流程：
@@ -6,7 +12,7 @@
 环境预检 → 算子设计 → 代码实现+测试+精度调试（一站式） → （可选）性能调优
 ```
 
-本仓库为 [OpenCode](https://opencode.ai) 预配置了项目规范（[AGENTS.md](../AGENTS.md)）、专家技能（Skills）和协作代理（Agents），开箱即用。
+本仓库为 [OpenCode](https://opencode.ai) 预配置了项目规范（[AGENTS.md](../docs/ascend_a2a3/AGENTS.candidate.md)）、专家技能（Skills）和协作代理（Agents），开箱即用。
 
 ---
 
@@ -24,18 +30,18 @@
 ### 方式二：参考同类算子
 
 ```
-参考 examples/normalization/example_layer_norm.py 的结构，
+参考 examples/ascend_a2a3/normalization/example_layer_norm.py 的结构，
 开发一个 RMSNorm 算子。
 ```
 
 ### 方式三：提供 design.md 草稿
 
 ```
-请根据 ./examples/my_op/draft_design.md 中的设计草稿，
+请根据 ./examples/ascend_a2a3/my_op/draft_design.md 中的设计草稿，
 开发对应的 TileLang-Ascend 算子。
 ```
 
-OpenCode 会自动加载项目规范，触发环境预检，编排 3 阶段流程。**唯一需要你确认的两件事**：编程模式（Developer / Expert / 混合）和精度通过后是否需要性能调优。
+OpenCode 会自动加载项目规范，触发环境预检，编排 3 阶段流程。**新任务信息不明时需要澄清的两件事（已确定则沿用）**：编程模式（Developer / Expert / 混合）和精度通过后是否需要性能调优。
 
 ---
 
@@ -77,7 +83,7 @@ Orchestrator 会自动驱动 3 阶段状态机：
 继续 softmax 的开发
 ```
 
-Orchestrator 从 `examples/softmax/.orchestrator_state.json` 自动续跑（环境预检不重复执行）。
+Orchestrator 从 `examples/ascend_a2a3/softmax/.orchestrator_state.json` 自动续跑（环境预检不重复执行）。
 
 ---
 
@@ -90,7 +96,7 @@ Claude Code 使用不同的目录结构，需要先迁移项目配置：
 mkdir -p .claude/skills .claude/agents
 
 # 2. 复制项目指令文件
-cp AGENTS.md CLAUDE.md
+# 原TA的全局复制指令不适用于当前main；AGENTS合并候选需专审，不能直接激活。
 
 # 3. 复制 Skills 和 Agents
 cp -r .agents/skills/* .claude/skills/
@@ -129,7 +135,7 @@ claude --agent tilelang-op-orchestrator
 
 ### AGENTS.md — 项目规范
 
-[AGENTS.md](../AGENTS.md) 是 OpenCode 的项目级自定义指令文件，在本仓库使用 OpenCode 时自动加载生效。
+[AGENTS.md](../docs/ascend_a2a3/AGENTS.candidate.md) 是 OpenCode 的项目级自定义指令文件，在本仓库使用 OpenCode 时自动加载生效。
 
 该文件定义了：
 
@@ -145,7 +151,7 @@ claude --agent tilelang-op-orchestrator
 
 ### Agents — 协作代理
 
-代理定义在 [`.opencode/agents/`](../.opencode/agents/) 目录下，负责编排和隔离执行算子开发流程。
+代理定义在 [`.opencode/agents/`](../.opencode/agents) 目录下，负责编排和隔离执行算子开发流程。
 
 | 代理 | 模式 | 职责 |
 |:---|:---|:---|
@@ -194,7 +200,7 @@ Stage 2: 代码实现 + 测试 + 精度调试（一站式）→ @tilelang-op-dev
 
 ### Skills — 专家技能
 
-技能定义在 [`.agents/skills/`](skills/) 目录下，每个 skill 包含一个 `SKILL.md` 文件描述完整执行流程。
+技能定义在 [`.agents/skills/`](skills) 目录下，每个 skill 包含一个 `SKILL.md` 文件描述完整执行流程。
 
 **调用方式**：
 
@@ -220,7 +226,7 @@ Stage 2: 代码实现 + 测试 + 精度调试（一站式）→ @tilelang-op-dev
 
 **你会得到**：design.md，包含编程模式选型、API 映射、内存层级规划、Tiling 策略、Loop 结构、同步策略、验证方案、风险点等
 
-**强制前置**：必须先查 `examples/` 同类实现，执行技术约束检测（三维 Kernel / threads / 动态边界 / L0C 容量 / GEMM 非整除）
+**强制前置**：必须先查 `examples/ascend_a2a3/` 同类实现，执行技术约束检测（三维 Kernel / threads / 动态边界 / L0C 容量 / GEMM 非整除）
 
 #### `tilelang-op-develop` — 算子代码生成
 
@@ -230,7 +236,7 @@ Stage 2: 代码实现 + 测试 + 精度调试（一站式）→ @tilelang-op-dev
 
 **你会得到**：单一文件 `example_{op}.py`（含 `@tilelang.jit` kernel + 内嵌 PyTorch golden + **用户指定 shape** 的 test 用例 + main 块）
 
-**关键约束**：优先复用 `examples/` 同类实现，冲突时以 examples > design.md > docs 为准
+**关键约束**：优先复用 `examples/ascend_a2a3/` 同类实现，冲突时以 examples > design.md > docs 为准
 
 #### `tilelang-perf-optimization` — 性能分析与优化
 
@@ -244,7 +250,7 @@ Stage 2: 代码实现 + 测试 + 精度调试（一站式）→ @tilelang-op-dev
 
 **适用场景**：新增或封装 `T.tile.xxx` 小 API（如 `T.tile.exp`、`T.tile.add`）
 
-**工作范围**：Python 前端（`ascend_tile.py`）→ C++ op（`src/op/`）→ lowering → Ascend C helper → codegen → 测试 + 文档
+**工作范围**：Python 前端（`ascend_tile.py`）→ C++ op（`src/ascend/a2a3/op/`）→ lowering → Ascend C helper → codegen → 测试 + 文档
 
 **注意**：这不是算子开发，而是**语言原语扩展**，会同时修改 Python 与 C++ 代码
 
@@ -282,7 +288,7 @@ Stage 2: 代码实现 + 测试 + 精度调试（一站式）→ @tilelang-op-dev
 - 编译产物：build 目录
 - 环境变量：`source set_env.sh`
 
-**自动修复**：子模块缺失、编译产物缺失、环境变量未设置（torch / CANN 版本问题需手动）
+**现代检查**：先只读定位；固定pin和主线build按既有授权处理，不自动换Torch/NPU/CANN，不给TIRX打旧补丁
 
 #### `tilelang-custom-skill/tilelang-debug-helper` — 调试辅助
 
@@ -354,10 +360,10 @@ Stage 2: 代码实现 + 测试 + 精度调试（一站式）→ @tilelang-op-dev
 
 ## 产物目录约定
 
-新建算子在 `examples/{op}/` 下：
+新建算子在 `examples/ascend_a2a3/{op}/` 下：
 
 ```
-examples/{op}/
+examples/ascend_a2a3/{op}/
 ├── DESIGN.md                              # Stage 1
 ├── example_{op}.py                        # Stage 2-3 单一交付文件（@tilelang.jit kernel + 内嵌 golden + 用户指定 shape 的 test 用例 + main）
 ├── README.md                              # Stage 2（可选）
@@ -421,7 +427,7 @@ softmax 算子精度已通过。是否需要进行性能调优？
 
 DESIGN.md 不视为**不可质疑的硬性约束**。实际开发中可能出现：
 
-- 设计选用的 API 在 `tilelang/language/` 中无导出
+- 设计选用的 API 在 `tilelang/ascend/a2a3/language/` 中无导出
 - Tiling 策略导致 L0C 容量溢出（> 128KB）
 - 内存层级路径不可实现
 - 同步策略与编程模式冲突
@@ -441,7 +447,7 @@ Developer 在 Stage 2 中识别到这些情形时，会在输出加 `[DESIGN_ERR
 <details>
 <summary><b>状态文件 .orchestrator_state.json 是什么？能手动改吗？</b></summary>
 
-每个算子在 `examples/{op}/.orchestrator_state.json` 维护一份独立状态：
+每个算子在 `examples/ascend_a2a3/{op}/.orchestrator_state.json` 维护一份独立状态：
 
 ```json
 {
@@ -489,7 +495,7 @@ Developer 在 Stage 2 中识别到这些情形时，会在输出加 `[DESIGN_ERR
 
 ## 相关文档
 
-- [AGENTS.md](../AGENTS.md) — 项目级开发规范
+- [AGENTS.md](../docs/ascend_a2a3/AGENTS.candidate.md) — 项目级开发规范
 - [.opencode/agents/README.md](../.opencode/agents/README.md) — 代理体系技术细节
-- [TileLang-Ascend Programming Guide](../docs/TileLang-Ascend%20Programming%20Guide.md) — 编程指南
-- [.agents/skills/](skills/) — Skill 库源文件
+- [TileLang-Ascend Programming Guide](../docs/ascend_a2a3/TileLang-Ascend%20Programming%20Guide.md) — 编程指南
+- [.agents/skills/](skills) — Skill 库源文件

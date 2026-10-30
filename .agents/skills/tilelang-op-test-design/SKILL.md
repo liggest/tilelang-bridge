@@ -1,7 +1,9 @@
 ---
 name: tilelang-op-test-design
-description: "TileLang-Ascend 算子测试设计技能。支持多种场景：(1) 从 design.md 设计测试配置 (2) 从 examples/{op}/*.py 补充测试 (3) 手动提供算子信息生成测试 (4) 测试覆盖率分析。理解算子实现逻辑后智能判断测试策略。触发：设计算子测试、生成测试用例、补充测试、测试覆盖率不足。"
+description: "TileLang-Ascend 算子测试设计技能。支持多种场景：(1) 从 design.md 设计测试配置 (2) 从 examples/ascend_a2a3/{op}/*.py 补充测试 (3) 手动提供算子信息生成测试 (4) 测试覆盖率分析。理解算子实现逻辑后智能判断测试策略。触发：设计算子测试、生成测试用例、补充测试、测试覆盖率不足。"
 ---
+
+> 适用范围：TA A2/A3 资产；主线 backend/build/IR/A5 技能保持独立。先读 docs/ascend_a2a3/migration.md，已有用户授权、模式与原配置优先；不重复请求同一批准，不因搬入本 skill 自动授权安装/外发/push/定时任务。
 
 # TileLang-Ascend 算子测试设计
 
@@ -16,7 +18,7 @@ description: "TileLang-Ascend 算子测试设计技能。支持多种场景：(1
 | 场景 | 输入来源 | 适用时机 | 工作流程 |
 |------|---------|---------|---------|
 | **场景 A** | design.md | 算子设计阶段 | 从设计文档提取信息 → 智能判断测试策略 → 生成测试配置建议 |
-| **场景 B** | examples/{op}/*.py | 算子已实现 | 从实现代码提取信息 → 分析现有测试 → 补充缺失用例 |
+| **场景 B** | examples/ascend_a2a3/{op}/*.py | 算子已实现 | 从实现代码提取信息 → 分析现有测试 → 补充缺失用例 |
 | **场景 C** | 用户口头描述 | 早期讨论阶段 | 用户交互收集信息 → 智能判断测试策略 → 生成测试模板 |
 | **场景 D** | 现有测试分析 | 测试完善阶段 | 分析现有测试覆盖率 → 智能判断缺失场景 → 补充测试用例 |
 
@@ -119,7 +121,7 @@ description: "TileLang-Ascend 算子测试设计技能。支持多种场景：(1
 ```
 步骤 1：阅读算子信息
     ├─ 场景 A：阅读 design.md §1.3 数学公式 + §1.4 算法描述
-    ├─ 场景 B：阅读 examples/{op}/ 算子实现代码
+    ├─ 场景 B：阅读 examples/ascend_a2a3/{op}/ 算子实现代码
     ├─ 场景 C：理解用户口头描述的数学公式
     └─ 场景 D：阅读现有测试代码，分析覆盖情况
 
@@ -167,8 +169,8 @@ description: "TileLang-Ascend 算子测试设计技能。支持多种场景：(1
         "dtype_count": 2,
         "shape_count": 5,  # 多种 M/N/K 组合
         "block_count": 3,  # 多种 block size
-        "三维参数": True,   # M/N/K
-    }
+        "三维参数": True,  # M/N/K
+    },
 }
 ```
 
@@ -199,7 +201,7 @@ description: "TileLang-Ascend 算子测试设计技能。支持多种场景：(1
         "shape_count": 4,
         "block_count": 2,
         "精度按 dtype": True,  # 不同 dtype 精度不同
-    }
+    },
 }
 ```
 
@@ -230,7 +232,7 @@ description: "TileLang-Ascend 算子测试设计技能。支持多种场景：(1
         "shape_count": 3,
         "block_count": 2,
         "workspace配置": True,  # 仅 Expert/混合或回退写法；Developer 模式默认消除 workspace，此项为 False
-    }
+    },
 }
 ```
 
@@ -246,7 +248,7 @@ description: "TileLang-Ascend 算子测试设计技能。支持多种场景：(1
 
 ```
 Phase 1：信息提取（强制步骤）
-    ├─ 定位 design.md 文件（examples/{op}/design.md）
+    ├─ 定位 design.md 文件（examples/ascend_a2a3/{op}/design.md）
     ├─ 提取 §1.3 数学公式
     ├─ 提取 §1.4 算法描述（计算步骤）
     ├─ 提取 §2 编程模式
@@ -287,7 +289,7 @@ Phase 5：输出测试代码
 
 ---
 
-### 4.2 场景 B：从 examples/{op}/ 算子文件输入
+### 4.2 场景 B：从 examples/ascend_a2a3/{op}/ 算子文件输入
 
 **触发**："补充这个算子的测试"
 
@@ -295,7 +297,7 @@ Phase 5：输出测试代码
 
 ```
 Phase 1：信息提取（强制步骤）
-    ├─ 定位 examples/{op}/ 算子文件（如 silu.py, flash_attn_bhsd.py）
+    ├─ 定位 examples/ascend_a2a3/{op}/ 算子文件（如 silu.py, flash_attn_bhsd.py）
     ├─ 阅读 Kernel 实现代码
     ├─ 提取函数签名（参数列表）
     ├─ 分析已有测试配置
@@ -324,7 +326,7 @@ Phase 5：输出补充测试（填充现有 test_{op}.py 的桩体，不新建�
     └─ 保持 main 分发器与 --level 接口不变（不改 generate 已写好的 main），kernel 仍从 {op}.py import
 ```
 
-> **场景 B 输出形式（强约束）**：**只填充现有 `test_{op}.py`** 的三个桩函数体，不新建独立 test 文件、**不改 `{op}.py`（kernel）**。generate 在 first_impl 已生成 `test_{op}.py`（含 `from {op} import {op}`、`test_{op}_l1/l2/boundary` 桩 + 稳定的 `main` 分发器）；场景 B 只替换这三个桩函数的函数体，**不改 main、不改 `--level` 接口、不动 L0 与 kernel 文件**。替换后用 `python examples/{op}/test_{op}.py --level all` 跑全量验证。
+> **场景 B 输出形式（强约束）**：**只填充现有 `test_{op}.py`** 的三个桩函数体，不新建独立 test 文件、**不改 `{op}.py`（kernel）**。generate 在 first_impl 已生成 `test_{op}.py`（含 `from {op} import {op}`、`test_{op}_l1/l2/boundary` 桩 + 稳定的 `main` 分发器）；场景 B 只替换这三个桩函数的函数体，**不改 main、不改 `--level` 接口、不动 L0 与 kernel 文件**。替换后用 `python examples/ascend_a2a3/{op}/test_{op}.py --level all` 跑全量验证。
 
 ---
 
@@ -411,11 +413,11 @@ Phase 5：输出补充测试代码
 ```python
 def gen_l1_shapes(bM, bN, k=4):
     return {
-        "D-SHAPE-ALIGNED":  (bM*k,            bN*k),             # block 整除（规则）
-        "D-SHAPE-TAIL-1":   (bM*k + 1,        bN*k),             # 余数 1（最易暴露边界 bug）
-        "D-SHAPE-TAIL-MID": (bM*k + bM//2,    bN*k + bN//2),     # 中间余数
-        "D-SHAPE-PRIME":    (nearest_prime(bM*k), nearest_prime(bN*k)),  # 完全非对齐
-        "D-SHAPE-EDGE":     (1, bN*k),                           # 退化（另配 (bM*k,1)/单元素）
+        "D-SHAPE-ALIGNED": (bM * k, bN * k),  # block 整除（规则）
+        "D-SHAPE-TAIL-1": (bM * k + 1, bN * k),  # 余数 1（最易暴露边界 bug）
+        "D-SHAPE-TAIL-MID": (bM * k + bM // 2, bN * k + bN // 2),  # 中间余数
+        "D-SHAPE-PRIME": (nearest_prime(bM * k), nearest_prime(bN * k)),  # 完全非对齐
+        "D-SHAPE-EDGE": (1, bN * k),  # 退化（另配 (bM*k,1)/单元素）
     }
 ```
 
@@ -478,7 +480,7 @@ def gen_l1_shapes(bM, bN, k=4):
 
 ### 算子信息
 - 算子名称: {op_name}
-- 输入来源: design.md / examples/{op}/*.py / 用户描述 / 测试分析
+- 输入来源: design.md / examples/ascend_a2a3/{op}/*.py / 用户描述 / 测试分析
 - 输入场景: {场景 A/B/C/D}
 
 ### 判断结果
@@ -748,7 +750,7 @@ if __name__ == "__main__":
     └─ shape 集合遵循 §6 确定性生成（非对齐必出）
 
 步骤 3：跑 checker
-    └─ python scripts/coverage_check.py examples/{op}/test_{op}.py --proto examples/{op}/proto.yaml
+    └─ python scripts/coverage_check.py examples/ascend_a2a3/{op}/test_{op}.py --proto examples/ascend_a2a3/{op}/proto.yaml
     └─ 打印逐维度 PASS / MISS / N/A 覆盖矩阵
 
 步骤 4：判定
@@ -763,7 +765,7 @@ if __name__ == "__main__":
 
 #### 核心要点
 
-1. **支持多种场景**：不只是 design.md，还支持 examples/{op}/*.py、用户描述、测试分析
+1. **支持多种场景**：不只是 design.md，还支持 examples/ascend_a2a3/{op}/*.py、用户描述、测试分析
 2. **算子类别划分依据科学**：基于硬件特性、计算步骤、数学公式三个维度
 3. **算子类别识别方法正确**：理解实现逻辑后判断
 4. **覆盖从"描述性"转"契约式"**：非对齐等场景由 §6 确定性生成 + 覆盖矩阵强制 + checker 门禁三重保证，杜绝"漏场景"

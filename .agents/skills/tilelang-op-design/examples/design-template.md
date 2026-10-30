@@ -112,7 +112,7 @@ with T.Kernel(block_num, is_npu=True) as (cid, vid):
 
 | 差异项 | 参考实现（GPU） | 本项目（Ascend） | 转换方案 |
 |--------|----------------|-----------------|----------|
-| Kernel 维度 | {三维 T.Kernel(m, n, batch)} | {一维 + block_metadata} | {参考 examples/grouped_gemm/} |
+| Kernel 维度 | {三维 T.Kernel(m, n, batch)} | {一维 + block_metadata} | {参考 examples/ascend_a2a3/grouped_gemm/} |
 | 循环边界 | {动态 T.Pipelined(batch_sizes[bz])} | {静态 + if k < k_iters} | {预计算 max_iters} |
 | GEMM API | {T.gemm} | {T.gemm_v0} | {查阅 api-compute.md} |
 | 内存分配 | {T.alloc_shared 自动映射} | {T.alloc_L1 显式层级} | {Expert 模式} |
@@ -120,11 +120,11 @@ with T.Kernel(block_num, is_npu=True) as (cid, vid):
 
 ### 3.5.3 本项目同类实现参考
 
-**必须列出**：本项目 examples/ 中最相似的实现
+**必须列出**：本项目 examples/ascend_a2a3/ 中最相似的实现
 
 | 文件路径 | 相似度 | 关键参考点 |
 |----------|--------|-----------|
-| {examples/xxx/example_xxx.py} | {高度相似} | {Kernel 结构、API 用法、同步方式} |
+| {examples/ascend_a2a3/xxx/example_xxx.py} | {高度相似} | {Kernel 结构、API 用法、同步方式} |
 
 ---
 
@@ -438,7 +438,7 @@ H2D → TileLang kernel → D2H，避免测试 harness 引入 aclnn 依赖。
 ### 11.1 目录结构
 
 ```
-examples/{算子名}/
+examples/ascend_a2a3/{算子名}/
 ├── {算子名}.py            # 纯 kernel（@tilelang.jit，可 import，无 golden/测试/__main__）
 ├── test_{算子名}.py       # from {算子名} import kernel + golden + 分层测试 + main
 ├── proto.yaml             # 算子接口规格（dtype/attr），供覆盖门禁派生应覆盖维度

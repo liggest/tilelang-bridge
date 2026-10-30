@@ -47,7 +47,7 @@
 
 **位置代码示例**:
 ```python
-# tilelang/engine/phase.py
+# tilelang/ascend/a2a3/pipeline.py
 def OptimizeForTarget(mod, target, platform):
     # ... (步骤 1-12)
     mod = tir.transform.PlanAndUpdateBufferAllocationLocation()(mod)
@@ -192,137 +192,17 @@ PrimFunc {
 | `TransformStmt()` | 执行变换 | {生成新 IR} |
 | `UpdateAttrs()` | 更新 attrs | {设置输出数据} |
 
-### 4.3 C++ 实现代码框架
+### 4.3 当前实现接入
 
-```cpp
-// 文件: src/transform/{pass_name}.cc
+填写完整native类与辅助函数、隔离FFI、Python require_native wrapper、CMake gate和必要测试。具体TIRX/注册占位模板见pass-generate/templates/pass-impl-skeleton-template.md；不能复制旧TVM_REGISTER_GLOBAL或_ffi_api调用。
 
-namespace tvm {
-namespace tl {
+### 4.4 参数与配置
 
-class {类名} : public arith::IRMutatorWithAnalyzer {  // 或 StmtExprVisitor
-public:
-  static PrimFunc Substitute(PrimFunc f, PassContext ctx) {
-    // 1. 读取输入 attrs（如有依赖）
-    auto input_attr = f->GetAttr<Map<...>>("attr_name").value();
-    
-    // 2. 创建变换器实例
-    {类名} mutator(f, ctx, input_attr);
-    
-    // 3. 执行变换
-    PrimFunc new_f = mutator.MutateFunc(f);
-    
-    // 4. 设置输出 attrs（如有输出）
-    new_f = new_f.WithAttrs({{"output_attr", output_data}});
-    
-    return new_f;
-  }
-  
-private:
-  // 成员变量
-  Map<...> input_attr_;
-  
-  // 核心方法
-  Stmt VisitStmt_(const ForNode* op) final {
-    // 处理 For 节点
-    // ...
-  }
-  
-  Stmt VisitStmt_(const BufferStoreNode* op) final {
-    // 处理 BufferStore 节点
-    // ...
-  }
-  
-  // 辅助方法
-  bool MatchPattern(/* params */) {
-    // 模式匹配逻辑
-  }
-  
-  Stmt TransformStmt(/* params */) {
-    // 变换逻辑
-  }
-};
+记录每个参数的真实类型/来源/default；配置enum唯一owner为tilelang/transform/pass_config.py，本地归一化在tilelang/ascend/a2a3/pass_config.py。native配置注册及默认值先查实际GetConfig和目标默认，不预设False。
 
-// Pass 注册
-tvm::transform::Pass {Pass名称}() {
-  auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
-    return {类名}::Substitute(std::move(f), ctx);
-  };
-  return CreatePrimFuncPass(pass_func, 0, "tl.{Pass名称}", {});
-}
+### 4.5 Pipeline上下文
 
-TVM_REGISTER_GLOBAL("tl.transform.{Pass名称}")
-    .set_body_typed({Pass名称});
-
-// 配置键（可选）
-static constexpr const char *k{Pass名称}Config = "tl.{pass_name}";
-TVM_REGISTER_PASS_CONFIG_OPTION(k{Pass名称}Config, Bool);
-
-} // namespace tl
-} // namespace tvm
-```
-
-### 4.4 Python Wrapper
-
-**文件**: `tilelang/transform/__init__.py`
-
-```python
-def {Pass名称}():
-    """{功能描述}。
-    
-    Returns:
-        Pass: The registered pass.
-    """
-    return _ffi_api.{Pass名称}()
-```
-
-### 4.5 配置键（可选）
-
-**文件**: `tilelang/transform/pass_config.py`
-
-```python
-class PassConfigKey(str, Enum):
-    TL_{PASS_NAME_UPPER} = "tl.{pass_name}"
-    """Enable/disable {Pass名称}. Default: False"""
-```
-
-**Pass 内读取配置**:
-```cpp
-bool config_enabled = ctx->GetConfig<Bool>(k{Pass名称}Config, Bool(false)).value();
-if (!config_enabled) {
-  return f;  // 配置为 false 时跳过该 Pass
-}
-```
-
-### 4.6 Pipeline 集成代码
-
-**文件**: `tilelang/engine/phase.py`
-
-```python
-# Phase 1 集成示例
-def LowerAndLegalize(mod, target):
-    # ... (现有 Pass)
-    mod = LowerTileOp()(mod)  # 步骤 9
-    # ===== 新增 Pass =====
-    mod = {Pass名称}()(mod)  # 步骤 X
-    # =====
-    mod = LegalizeVectorizedLoop()(mod)  # 步骤 10
-    # ...
-    return mod
-
-# 或 Phase 2 集成示例
-def OptimizeForTarget(mod, target, platform):
-    # ... (现有 Pass)
-    mod = AscendStorageRewrite(is_npu)(mod)  # 步骤 13
-    # ===== 新增 Pass =====
-    mod = {Pass名称}()(mod)  # 步骤 X
-    # =====
-    mod = tir.transform.UnrollLoop()(mod)  # 步骤 14
-    # ...
-    return mod
-```
-
----
+给出当前tilelang/ascend/a2a3/pipeline.py中前后调用、条件和完整参数，并证明producer/consumer事实仍成立；model=A2/A3，keys决定方言。AscendC MaskLegalize后不得再rewrite，不用旧phase步骤数字猜插入位置。
 
 ## 5. 测试方案
 
@@ -386,11 +266,11 @@ def OptimizeForTarget(mod, target, platform):
 ### 7.1 目录结构
 
 ```
-src/transform/
+src/ascend/a2a3/transform/
 ├── {pass_name}.cc           # C++ 实现
 └── common/                  # 公共工具（如需新增）
 
-tilelang/transform/
+tilelang/ascend/a2a3/transform/
 ├── __init__.py              # Python Wrapper
 └── pass_config.py           # 配置键（如需新增）
 
@@ -402,19 +282,19 @@ tilelang/engine/
 
 | 文件 | 状态 | 说明 |
 |------|------|------|
-| `src/transform/{pass_name}.cc` | {待实现} | C++ 实现 |
-| `tilelang/transform/__init__.py` | {待修改} | 添加 Python Wrapper |
-| `tilelang/transform/pass_config.py` | {待修改（可选）} | 添加配置键 |
-| `tilelang/engine/phase.py` | {待修改} | Pipeline 集成 |
+| `src/ascend/a2a3/transform/{pass_name}.cc` | {待实现} | C++ 实现 |
+| `tilelang/ascend/a2a3/transform/__init__.py` | {待修改} | 添加 Python Wrapper |
+| `tilelang/ascend/a2a3/pass_config.py` | {待修改（可选）} | 添加配置键 |
+| `tilelang/ascend/a2a3/pipeline.py` | {待修改} | Pipeline 集成 |
 | `pass-design.md` | {已完成} | 本设计文档 |
 
 ### 7.3 实现顺序
 
 1. ✅ 设计文档（pass-design.md）
-2. ⬜ C++ 实现（src/transform/{pass_name}.cc）
-3. ⬜ Python Wrapper（tilelang/transform/__init__.py）
+2. ⬜ C++ 实现（src/ascend/a2a3/transform/{pass_name}.cc）
+3. ⬜ Python Wrapper（tilelang/ascend/a2a3/transform/__init__.py）
 4. ⬜ 配置键（可选）
-5. ⬜ Pipeline 集成（tilelang/engine/phase.py）
+5. ⬜ Pipeline 集成（tilelang/ascend/a2a3/pipeline.py）
 6. ⬜ 功能测试
 7. ⬜ 依赖测试
 
@@ -423,4 +303,4 @@ tilelang/engine/
 完成本设计文档后，建议：
 1. 使用 **tilelang-pass-workflow-analyzer** skill 查看详细 Pass 工作流
 2. 使用 **tilelang-pass-analyzer** skill 查看类似 Pass 的实现细节
-3. 开始 C++ 实现前，参考 `src/transform/` 中相似 Pass 的代码结构
+3. 开始 C++ 实现前，参考 `src/ascend/a2a3/transform/` 中相似 Pass 的代码结构

@@ -3,8 +3,8 @@ name: tilelang-op-developer
 description: "TileLang-Ascend 算子开发 Subagent。负责 Stage 2 一站式工作：代码生成 / 分层测试（L0 收敛 → 扩展 L1/L2/Boundary）/ 精度调试。每次调度执行单轮工作，由 mode 字段区分语义。"
 mode: subagent
 skills:
-  - tilelang-op-develop
-  - tilelang-op-test-design
+- tilelang-op-develop
+- tilelang-op-test-design
 tools:
   read: true
   write: true
@@ -35,7 +35,7 @@ Stage 2 承担算子开发的核心循环。Orchestrator 通过 `mode` 字段控
 3. **以真实执行结果做四态判定**：所有结论必须来源于真实命令输出，不得凭经验推断。
 4. **`[DESIGN_ERROR]` 必须严格识别**：发现根因在 design 层面（非实现层）时必须在输出明确加 `[DESIGN_ERROR]` 标记触发设计回退。不得为"完成本阶段"硬扛设计错误强行写出明知有问题的实现，也不得把单纯的实现 bug 推给 design。判定标准见下文「设计错误识别清单」。
 5. **`precision_fix` 模式每次修改前必须先备份**：拷贝当前 kernel `{op}.py` 到 `history_version/{op}_impl_s2_attempt{N}.py`（N 由 Orchestrator 传入 `attempt_index`）。精度调试改的是 kernel（`{op}.py`），不改测试文件。
-6. **遵循项目根 [AGENTS.md](../../AGENTS.md) 的 6 项核心原则**，特别是"不要凭记忆猜 API"、"从示例入手（先查 examples/）"、"遵循硬件内存层级"、"优先复用、定位问题而非重写"。
+6. **遵循项目根 [AGENTS.md](../../docs/ascend_a2a3/AGENTS.candidate.md) 的 6 项核心原则**，特别是"不要凭记忆猜 API"、"从示例入手（先查 examples/ascend_a2a3/）"、"遵循硬件内存层级"、"优先复用、定位问题而非重写"。
 
 ---
 
@@ -45,7 +45,7 @@ Stage 2 承担算子开发的核心循环。Orchestrator 通过 `mode` 字段控
 
 | 情形 | 识别信号 | 不得自行解决的原因 |
 |------|---------|------------------|
-| 设计选用的 API 不存在 | 在 `tilelang/language/__init__.py` 或源码中查不到 design 提到的 API；或 lowering 未实现 | 实现层无法"凭空补出"一个不存在的 API |
+| 设计选用的 API 不存在 | 在 `tilelang/ascend/a2a3/language/__init__.py` 或源码中查不到 design 提到的 API；或 lowering 未实现 | 实现层无法"凭空补出"一个不存在的 API |
 | L0C 容量溢出 | design 中 `block_M × block_N × sizeof(accum)` > 128KB；编译/运行时报 L0C 超限 | 需要重新设计 block 大小或拆分策略 |
 | 内存层级路径不可实现 | 例如 design 要求 GM → L0 直接搬运、跳过 L1/UB | 这是硬件层硬性约束，无法在实现层绕过 |
 | 同步策略与编程模式冲突 | 例如 Developer 模式 design 中却要求 `T.set_flag` / `T.wait_flag` 手动同步 | 模式冲突需在 design 层重新选型 |
@@ -67,10 +67,10 @@ attempt 1，首次进入 Stage 2。你负责根据 `DESIGN.md` 生成**两个文
 
 | 类型 | 内容 | 需要读取的信息 |
 |------|------|---------------|
-| 必需输入 | `examples/{op}/DESIGN.md` | 编程模式、API 选型、内存层级、tiling 策略、loop 结构、同步策略、验证方案（含 golden 草案、**L0 门槛测试计划**：L0 shape/dtype/精度标准）|
-| 输出文件 | `examples/{op}/{op}.py` | 纯 kernel：`@tilelang.jit` kernel + `pass_configs`（无 golden、无测试、无 `__main__`） |
-| 输出文件 | `examples/{op}/test_{op}.py` | `from {op} import {op}` + golden 函数 + **L0 用例**（+ L0 通过后扩展的 L1/L2/Boundary）+ main 块（含分层标记输出，支持 `--level`） |
-| 输出文件 | `examples/{op}/README.md`（可选） | 实现说明 |
+| 必需输入 | `examples/ascend_a2a3/{op}/DESIGN.md` | 编程模式、API 选型、内存层级、tiling 策略、loop 结构、同步策略、验证方案（含 golden 草案、**L0 门槛测试计划**：L0 shape/dtype/精度标准）|
+| 输出文件 | `examples/ascend_a2a3/{op}/{op}.py` | 纯 kernel：`@tilelang.jit` kernel + `pass_configs`（无 golden、无测试、无 `__main__`） |
+| 输出文件 | `examples/ascend_a2a3/{op}/test_{op}.py` | `from {op} import {op}` + golden 函数 + **L0 用例**（+ L0 通过后扩展的 L1/L2/Boundary）+ main 块（含分层标记输出，支持 `--level`） |
+| 输出文件 | `examples/ascend_a2a3/{op}/README.md`（可选） | 实现说明 |
 | 使用 Skill | `tilelang-op-develop` | 生成 kernel + L0 用例 |
 | 使用 Skill | `tilelang-op-test-design`（场景 B） | L0 通过后扩展 L1/L2/Boundary |
 
@@ -124,10 +124,10 @@ attempt 1，首次进入 Stage 2。你负责根据 `DESIGN.md` 生成**两个文
 
 | 类型 | 内容 | 需要读取的信息 |
 |------|------|---------------|
-| 必需输入 | 当前 `examples/{op}/{op}.py`（kernel）与 `examples/{op}/test_{op}.py`（测试） | 修改基础（编译/运行 bug 多在 kernel；import/测试侧问题在 test 文件） |
+| 必需输入 | 当前 `examples/ascend_a2a3/{op}/{op}.py`（kernel）与 `examples/ascend_a2a3/{op}/test_{op}.py`（测试） | 修改基础（编译/运行 bug 多在 kernel；import/测试侧问题在 test 文件） |
 | 必需输入 | `last_failure_summary`（由 Orchestrator 传入） | 上次失败的 stderr 摘要 + 失败子类型 |
-| 必需输入 | `examples/{op}/DESIGN.md` | 编程模式、API 选型、内存层级路径（用于核对修改方向） |
-| 输出文件 | 更新后的 `examples/{op}/{op}.py` 和/或 `examples/{op}/test_{op}.py` | — |
+| 必需输入 | `examples/ascend_a2a3/{op}/DESIGN.md` | 编程模式、API 选型、内存层级路径（用于核对修改方向） |
+| 输出文件 | 更新后的 `examples/ascend_a2a3/{op}/{op}.py` 和/或 `examples/ascend_a2a3/{op}/test_{op}.py` | — |
 | 使用 Skill | `tilelang-op-develop` | 仅在需要重新生成大段代码时；小修可直接 Edit |
 
 ### 运行失败子类型与处理
@@ -162,12 +162,12 @@ attempt 1，首次进入 Stage 2。你负责根据 `DESIGN.md` 生成**两个文
 
 | 类型 | 内容 | 需要读取的信息 |
 |------|------|---------------|
-| 必需输入 | `examples/{op}/{op}.py` | 当前 kernel 实现（修复对象） |
-| 必需输入 | `examples/{op}/test_{op}.py` | golden + 失败用例（对比基准，不修改） |
+| 必需输入 | `examples/ascend_a2a3/{op}/{op}.py` | 当前 kernel 实现（修复对象） |
+| 必需输入 | `examples/ascend_a2a3/{op}/test_{op}.py` | golden + 失败用例（对比基准，不修改） |
 | 必需输入 | `last_failure_summary`（由 Orchestrator 传入） | 上次失败的 max_diff / matched_ratio、失败用例 shape、出现位置 |
-| 必需输入 | `examples/{op}/DESIGN.md` | 编程模式、API 选型、内存层级路径（用于判断是否为设计错误） |
-| 备份目录 | `examples/{op}/history_version/` | — |
-| 输出文件 | 更新后的 `examples/{op}/{op}.py`（kernel） | — |
+| 必需输入 | `examples/ascend_a2a3/{op}/DESIGN.md` | 编程模式、API 选型、内存层级路径（用于判断是否为设计错误） |
+| 备份目录 | `examples/ascend_a2a3/{op}/history_version/` | — |
+| 输出文件 | 更新后的 `examples/ascend_a2a3/{op}/{op}.py`（kernel） | — |
 | 使用 Skill | （无专属 skill，依赖自身能力） | — |
 
 ### 备份规则
@@ -175,7 +175,7 @@ attempt 1，首次进入 Stage 2。你负责根据 `DESIGN.md` 生成**两个文
 | 规则 | 说明 |
 |------|------|
 | 备份时机 | 每次修改 kernel `{op}.py` 之前 |
-| 备份位置 | `examples/{op}/history_version/` |
+| 备份位置 | `examples/ascend_a2a3/{op}/history_version/` |
 | 备份命名 | `{op}_impl_s2_attempt{N}.py`（N 由 Orchestrator 传入的 `attempt_index` 决定） |
 | 回滚来源 | 始终回滚到本次修复开始前的备份版本 |
 | 保留策略 | 所有备份保留，不自动清理 |
@@ -233,7 +233,7 @@ attempt 1，首次进入 Stage 2。你负责根据 `DESIGN.md` 生成**两个文
 3.5. **覆盖自检门禁（强制）**：扩展完成后在仓库根目录跑 checker（与跑测同一工作目录）。`proto.yaml` 是 **Stage 1 产物**（analyst 已从 DESIGN.md §9.3 精度表 + §4 派生并经门禁校验），始终存在，用于派生 `D-DTYPE-*` / `D-PARAM-*` 应覆盖维度：
    ```bash
    python .agents/skills/tilelang-op-test-design/scripts/coverage_check.py \
-       examples/{op}/test_{op}.py --proto examples/{op}/proto.yaml
+       examples/ascend_a2a3/{op}/test_{op}.py --proto examples/ascend_a2a3/{op}/proto.yaml
    ```
    - 任一**强制维度 MISS**（exit 1）→ 视为自检失败，**回到步骤 3 调 `tilelang-op-test-design` 补齐缺失维度的用例**，重跑 checker，直至全 PASS/N/A。**未通过覆盖门禁不得进入最终判定 / 返回 `[PRECISION_PASS]`**。
    - 合理缺失须在 `COVERAGE_NA` 显式声明理由（仅对可豁免维度生效）。
@@ -270,13 +270,13 @@ main 块支持按层执行（精度收敛只跑 L0，扩展后跑全量）：
 ```bash
 # 必须在仓库根目录执行，确保 set_env.sh 路径正确
 # 精度收敛阶段：只跑 L0
-source set_env.sh && python examples/{op}/test_{op}.py --level l0
+source set_env.sh && python examples/ascend_a2a3/{op}/test_{op}.py --level l0
 
 # 扩展后：跑全量（L0/L1/L2/Boundary）
-source set_env.sh && python examples/{op}/test_{op}.py --level all
+source set_env.sh && python examples/ascend_a2a3/{op}/test_{op}.py --level all
 
 # 长耗时测试可用 nohup 后台执行避免子进程超时
-nohup bash -c "source set_env.sh && python examples/{op}/test_{op}.py --level all" > test_output.log 2>&1 &
+nohup bash -c "source set_env.sh && python examples/ascend_a2a3/{op}/test_{op}.py --level all" > test_output.log 2>&1 &
 ```
 
 L0/L1 输出必须包含三态标记之一（`[PRECISION_PASS]` / `[PRECISION_FAIL]`），否则归类为"运行失败"；L2/Boundary 输出 `[BOUNDARY_PASS]` / `[BOUNDARY_WARN]`（仅记录）。
@@ -285,7 +285,7 @@ L0/L1 输出必须包含三态标记之一（`[PRECISION_PASS]` / `[PRECISION_FA
 
 ## debug_log 约定
 
-每次调度完成后，必须在 `examples/{op}/debug_log.md` 追加一条结构化记录：
+每次调度完成后，必须在 `examples/ascend_a2a3/{op}/debug_log.md` 追加一条结构化记录：
 
 ```
 ## Attempt {N} — {ISO timestamp}

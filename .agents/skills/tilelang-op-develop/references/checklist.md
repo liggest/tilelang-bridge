@@ -1,3 +1,5 @@
+> 新kernel设计检查表；迁移既有TA资产时factory/config/launch/vid/workspace/所有原case保持原合同，不因下列推荐默认而改写算法。实际支持边界失败必须保持非零；Boundary/L1标签不允许把原失败转为pass。导入时不清cache/编译/launch，源确需clear时仅显式专属TILELANG_CACHE_DIR，见当前example-merge技能。
+
 # Checklist
 
 生成代码后逐项检查：
@@ -56,7 +58,7 @@
 | 15 | **分层标记输出** | 每个用例按层打标记：L0/L1 → `[PRECISION_PASS]`/`[PRECISION_FAIL]`；L2/Boundary → `[BOUNDARY_PASS]`/`[BOUNDARY_WARN]`，含 shape/dtype，避免看似卡住 |
 | 16 | **最终输出 + 退出码** | `test_{op}.py` 的 main 在 L0/L1 全过时最后一行 `print("Test Passed!")`（或 `"Kernel Output Match!"`）并 `sys.exit(0)`（据退出码 + 该行判定）；L0/L1 任一失败 `sys.exit(1)`。L2/Boundary 的 `[BOUNDARY_WARN]` 不改变退出码 |
 | 17 | **--level 参数** | `argparse` 提供 `--level {l0,l1,l2,boundary,all}`（默认 `l0`）：精度收敛跑 `l0`、扩展后跑 `all`；main 按 level 分发各层函数 |
-| 18 | **代码格式检查** | `ruff check examples/{op}/{op}.py examples/{op}/test_{op}.py` + `ruff format --check examples/{op}/{op}.py examples/{op}/test_{op}.py` 通过 |
+| 18 | **代码格式检查** | `ruff check examples/ascend_a2a3/{op}/{op}.py examples/ascend_a2a3/{op}/test_{op}.py` + `ruff format --check examples/ascend_a2a3/{op}/{op}.py examples/ascend_a2a3/{op}/test_{op}.py` 通过 |
 
 ## 4. 融合算子专项检查
 

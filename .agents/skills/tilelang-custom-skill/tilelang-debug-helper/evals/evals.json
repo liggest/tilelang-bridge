@@ -3,7 +3,7 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "I need to debug the sigmoid example in examples/activation/sigmoid.py. Can you add debugging code so I can attach GDB?",
+      "prompt": "I need to debug the sigmoid example in examples/ascend_a2a3/activation/sigmoid.py. Can you add debugging code so I can attach GDB?",
       "expected_output": "A modified sigmoid.py file with import os, PID printing, and input() for GDB attachment, placed before kernel execution",
       "files": [],
       "assertions": [
@@ -27,13 +27,13 @@
     },
     {
       "id": 2,
-      "prompt": "Help me debug this TileLang operator. I want to use GDB to step through the C++ code. The file is examples/activation/relu.py",
+      "prompt": "Help me debug this TileLang operator. I want to use GDB to step through the C++ code. The file is examples/ascend_a2a3/activation/relu.py",
       "expected_output": "A debug version of relu.py with proper debug code insertion",
       "files": []
     },
     {
       "id": 3,
-      "prompt": "Create a debug version of examples/gemm/matmul_example.py so I can attach a debugger in VSCode",
+      "prompt": "Create a debug version of examples/ascend_a2a3/gemm/matmul_example.py so I can attach a debugger in VSCode",
       "expected_output": "A new matmul_example_debug.py file with GDB debug code added",
       "files": []
     }

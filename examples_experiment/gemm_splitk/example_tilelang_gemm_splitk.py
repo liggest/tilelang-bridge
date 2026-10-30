@@ -1,7 +1,10 @@
+"""Complete original experimental source; runtime requires explicit main()."""
+
+from tilelang.env import CacheState
 import argparse
 
 import tilelang
-import tilelang.language as T
+import tilelang.ascend.a2a3.language as T
 import torch
 
 pass_configs = {
@@ -70,7 +73,7 @@ def test(M, N, K, split_k):
     print(f"Test passed: M={M}, N={N}, K={K}, split_k={split_k}")
 
 
-def main():
+def _original_main():
     parser = argparse.ArgumentParser(description="TileLang-Ascend Split-K GEMM")
     parser.add_argument("--M", type=int, default=0)
     parser.add_argument("--N", type=int, default=0)
@@ -87,6 +90,19 @@ def main():
         test(1024, 1024, 1024, 4)
 
     print("Kernel Output Match!")
+
+
+def main():
+    import torch_npu  # noqa: F401
+
+    _prior_cache_enabled = CacheState.is_enabled()
+    try:
+        _original_main()
+    finally:
+        if _prior_cache_enabled:
+            CacheState.enable()
+        else:
+            CacheState.disable()
 
 
 if __name__ == "__main__":

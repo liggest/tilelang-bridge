@@ -8,22 +8,22 @@
 
 | Pass 名称 | 注册名 | Python 函数 | C++ 文件 | 配置键 |
 |-----------|--------|-------------|---------|--------|
-| AscendSyncInsert | tl.transform.AscendSyncInsert | `AscendSyncInsert(target, platform)` | `ascend_sync_insert.cc` | `tl.ascend_auto_sync` |
-| AscendSyncInsertVS | tl.transform.AscendSyncInsertVS | `AscendSyncInsertVS(target, platform)` | `ascend_sync_insert_vs.cc` | `tl.ascend_auto_sync_vs` |
-| AscendMemoryPlanning | tl.transform.AscendMemoryPlanning | `AscendMemoryPlanning()` | `ascend_memory_planning.cc` | `tl.ascend_memory_planning` controls automatic strategy; pass always publishes maps |
-| CombineCV | tl.transform.CombineCV | `CombineCV()` | `ascend_combinecv.cc` | `tl.ascend_auto_cv_combine`; `tl.ascend_auto_cross_core_sync` controls its optional sync insertion |
-| AscendResourceScopeVerify | tl.transform.AscendResourceScopeVerify | `AscendResourceScopeVerify()` | `ascend_combinecv.cc` | - |
-| AscendVectorInstructionSelection | tl.transform.AscendVectorInstructionSelection | `AscendVectorInstructionSelection(target, platform)` | `ascend_vector_instruction_selection.cc` | A2/A3 AscendC/auto pipeline gate |
-| AscendVectorMaskLegalize | tl.transform.AscendVectorMaskLegalize | `AscendVectorMaskLegalize(target, platform)` | `ascend_vector_mask_legalize.cc` | `tl.ascend_vector_mask_reuse` (default `true`) |
-| CrossCorePipeline | tl.transform.CrossCorePipeline | `CrossCorePipeline()` | `cross_core_pipeline.cc` | - |
-| AscendLowerParallelToVector | tl.transform.AscendLowerParallelToVector | `AscendLowerParallelToVector()` | `ascend_lower_parallel_to_vector.cc` | - |
-| AscendStorageRewrite | tl.transform.AscendStorageRewrite | `AscendStorageRewrite(is_npu)` | `ascend_storage_rewrite.cc` | - |
-| InferAllocScope | tl.transform.InferAllocScope | `AscendInferBufferScope()` | `ascend_infer_buffer_scope.cc` | - |
-| AscendLowerOpaqueBlock | tl.transform.AscendLowerOpaqueBlock | `AscendLowerOpaqueBlock()` | `ascend_lower_opaque_block.cc` | - |
-| Flatten2DBuffer | tl.transform.Flatten2DBuffer | `Flatten2DBuffer()` | `ascend_collect_buffer_shape.cc` | - |
-| CollectBufferShapes | tl.transform.CollectBufferShapes | `CollectBufferShapes()` | `ascend_pto_save_buffer_shape.cc` | - |
-| BufferShapeCollector | tl.transform.BufferShapeCollector | `BufferShapeCollector()` | `ascend_collect_buffer_shape.cc` | - |
-| HostLegalize | tl.transform.HostLegalize | `HostProcesser()` | `ascend_host.cc` | - |
+| AscendSyncInsert | tl.transform.A2A3AscendSyncInsert | `AscendSyncInsert(target, platform)` | `ascend_sync_insert.cc` | `tl.ascend_auto_sync` |
+| AscendSyncInsertVS | tl.transform.A2A3AscendSyncInsertVS | `AscendSyncInsertVS(target, platform)` | `ascend_sync_insert_vs.cc` | `tl.ascend_auto_sync_vs` |
+| AscendMemoryPlanning | tl.transform.A2A3AscendMemoryPlanning | `AscendMemoryPlanning()` | `ascend_memory_planning.cc` | `tl.ascend_memory_planning` controls automatic strategy; pass always publishes maps |
+| CombineCV | tl.transform.A2A3CombineCV | `CombineCV()` | `ascend_combinecv.cc` | `tl.ascend_auto_cv_combine`; `tl.ascend_auto_cross_core_sync` controls its optional sync insertion |
+| AscendResourceScopeVerify | tl.transform.A2A3AscendResourceScopeVerify | `AscendResourceScopeVerify()` | `ascend_combinecv.cc` | - |
+| AscendVectorInstructionSelection | tl.transform.A2A3AscendVectorInstructionSelection | `AscendVectorInstructionSelection(target, platform)` | `ascend_vector_instruction_selection.cc` | A2/A3 AscendC/auto pipeline gate |
+| AscendVectorMaskLegalize | tl.transform.A2A3AscendVectorMaskLegalize | `AscendVectorMaskLegalize(target, platform)` | `ascend_vector_mask_legalize.cc` | `tl.ascend_vector_mask_reuse` (default `true`) |
+| CrossCorePipeline | tl.transform.A2A3CrossCorePipeline | `CrossCorePipeline()` | `cross_core_pipeline.cc` | - |
+| AscendLowerParallelToVector | tl.transform.A2A3AscendLowerParallelToVector | `AscendLowerParallelToVector()` | `ascend_lower_parallel_to_vector.cc` | - |
+| AscendStorageRewrite | tl.transform.A2A3AscendStorageRewrite | `AscendStorageRewrite(is_npu)` | `ascend_storage_rewrite.cc` | - |
+| InferAllocScope | tl.transform.A2A3InferAllocScope | `AscendInferBufferScope()` | `ascend_infer_buffer_scope.cc` | - |
+| AscendLowerOpaqueBlock | tl.transform.A2A3AscendLowerOpaqueBlock | `AscendLowerOpaqueBlock()` | `ascend_lower_opaque_block.cc` | - |
+| Flatten2DBuffer | tl.transform.A2A3Flatten2DBuffer | `Flatten2DBuffer()` | `ascend_collect_buffer_shape.cc` | - |
+| CollectBufferShapes | tl.transform.A2A3CollectBufferShapes | `CollectBufferShapes()` | `ascend_pto_save_buffer_shape.cc` | - |
+| BufferShapeCollector | tl.transform.A2A3BufferShapeCollector | `BufferShapeCollector()` | `ascend_collect_buffer_shape.cc` | - |
+| HostLegalize | tl.transform.A2A3HostLegalize | `HostProcesser()` | `ascend_host.cc` | - |
 
 ---
 
@@ -114,7 +114,7 @@ managed `T.tile.*` semantic operation 改写为带类型化 repeat/mask 参数�
 校验 exact dtype、operand ABI、count/mask/repeat/stride bounds，并重验已有 selected call 的
 variant 与 payload。
 
-完整 Selection 规则由 `src/op/ascend_vector_mask_ops.inc` catalog 驱动；公共编译契约见
+完整 Selection 规则由 `src/ascend/a2a3/op/ascend_vector_mask_ops.inc` catalog 驱动；公共编译契约见
 `docs/ascend/compiler_managed_vector_mask.md`。
 
 ---
@@ -236,7 +236,7 @@ notification 协议表达。
 ## 文件路径汇总
 
 ```
-src/transform/
+src/ascend/a2a3/transform/
 ├── ascend_sync_insert.cc
 ├── ascend_memory_planning.cc
 ├── ascend_combinecv.cc

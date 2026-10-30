@@ -41,9 +41,9 @@
 for k in T.serial(loop_k):
     T.copy(A[bx * block_M, k * K_L1], A_L1)  # 搬运
     T.copy(B[k * K_L1, by * block_N], B_L1)  # 搬运
-    T.barrier_all()                          # 等待搬运完成
-    T.gemm_v0(A_L1, B_L1, C_L0, ...)         # 计算
-    T.barrier_all()                          # 等待计算完成
+    T.barrier_all()  # 等待搬运完成
+    T.gemm_v0(A_L1, B_L1, C_L0, ...)  # 计算
+    T.barrier_all()  # 等待计算完成
 ```
 
 **问题**：数据搬运和计算无法重叠，每次都要等待前一步完成。
@@ -63,7 +63,7 @@ for k in T.serial(loop_k):
         # 预取下一轮数据到另一个缓冲
         T.copy(A[bx * block_M, (k + 1) * K_L1], A_L1[(k + 1) % S1, :, :])
         T.copy(B[(k + 1) * K_L1, by * block_N], B_L1[(k + 1) % S1, :, :])
-    
+
     # 使用当前缓冲进行计算
     T.mma(A_L0[kk % S2, :, :], B_L0[kk % S2, :, :], C_L0, ...)
 ```
@@ -103,18 +103,19 @@ T.barrier_all()  # 所有流水等待计算完成
 def init_flag():
     T.set_flag("mte1", "mte2", 0)  # MTE1 通知 MTE2：L1 缓冲 0 可用（供搬运）
     T.set_flag("mte1", "mte2", 1)  # MTE1 通知 MTE2：L1 缓冲 1 可用（供搬运）
-    T.set_flag("m", "mte1", 0)     # M 通知 MTE1：L0 缓冲 0 可用（供搬运）
-    T.set_flag("m", "mte1", 1)     # M 通知 MTE1：L0 缓冲 1 可用（供搬运）
-    T.set_flag("fix", "m", 0)      # FIX 通知 M：初始状态就绪
+    T.set_flag("m", "mte1", 0)  # M 通知 MTE1：L0 缓冲 0 可用（供搬运）
+    T.set_flag("m", "mte1", 1)  # M 通知 MTE1：L0 缓冲 1 可用（供搬运）
+    T.set_flag("fix", "m", 0)  # FIX 通知 M：初始状态就绪
+
 
 @T.macro
 def clear_flag():
     # 等待所有 Flag 完成，确保流水线正确结束
     T.wait_flag("mte1", "mte2", 0)  # 等待 MTE1 通知 MTE2 的 flag 0
     T.wait_flag("mte1", "mte2", 1)  # 等待 MTE1 通知 MTE2 的 flag 1
-    T.wait_flag("m", "mte1", 0)     # 等待 M 通知 MTE1 的 flag 0
-    T.wait_flag("m", "mte1", 1)     # 等待 M 通知 MTE1 的 flag 1
-    T.wait_flag("fix", "m", 0)      # 等待 FIX 通知 M 的 flag 0
+    T.wait_flag("m", "mte1", 0)  # 等待 M 通知 MTE1 的 flag 0
+    T.wait_flag("m", "mte1", 1)  # 等待 M 通知 MTE1 的 flag 1
+    T.wait_flag("fix", "m", 0)  # 等待 FIX 通知 M 的 flag 0
 ```
 
 **流水线阶段说明**：
@@ -150,20 +151,20 @@ Flag 支持双向通信，用于协调缓冲的生产者和消费者：
 
 ```python
 # 1. MTE2 搬运数据到 L1（生产者）
-T.wait_flag("mte1", "mte2", k % S1)      # MTE2 等待 L1 缓冲可用
-T.copy(A[...], A_L1[k % S1, :, :])      # MTE2: GM → L1 搬运
-T.set_flag("mte2", "mte1", k % S1)       # MTE2 通知 MTE1 数据已就绪
+T.wait_flag("mte1", "mte2", k % S1)  # MTE2 等待 L1 缓冲可用
+T.copy(A[...], A_L1[k % S1, :, :])  # MTE2: GM → L1 搬运
+T.set_flag("mte2", "mte1", k % S1)  # MTE2 通知 MTE1 数据已就绪
 
 # 2. MTE1 搬运数据到 L0（消费者 + 生产者）
-T.wait_flag("mte2", "mte1", k % S1)      # MTE1 等待 L1 数据就绪
-T.copy(A_L1[k % S1, ...], A_L0[kk % S2]) # MTE1: L1 → L0 搬运
-T.set_flag("mte1", "mte2", k % S1)       # MTE1 通知 MTE2 L1 缓冲可重用
-T.set_flag("mte1", "m", kk % S2)         # MTE1 通知 M 数据已就绪
+T.wait_flag("mte2", "mte1", k % S1)  # MTE1 等待 L1 数据就绪
+T.copy(A_L1[k % S1, ...], A_L0[kk % S2])  # MTE1: L1 → L0 搬运
+T.set_flag("mte1", "mte2", k % S1)  # MTE1 通知 MTE2 L1 缓冲可重用
+T.set_flag("mte1", "m", kk % S2)  # MTE1 通知 M 数据已就绪
 
 # 3. M 执行矩阵乘（消费者）
-T.wait_flag("mte1", "m", kk % S2)        # M 等待 L0 数据就绪
-T.mma(A_L0[...], B_L0[...], C_L0)        # M: 执行矩阵乘
-T.set_flag("m", "mte1", kk % S2)         # M 通知 MTE1 L0 缓冲可重用
+T.wait_flag("mte1", "m", kk % S2)  # M 等待 L0 数据就绪
+T.mma(A_L0[...], B_L0[...], C_L0)  # M: 执行矩阵乘
+T.set_flag("m", "mte1", kk % S2)  # M 通知 MTE1 L0 缓冲可重用
 ```
 
 **收益**：
@@ -198,10 +199,9 @@ loop_kk = T.ceildiv(K_L1, block_K)
 for kk in T.serial(loop_kk):
     T.copy(A_L1[k % S1, 0, kk * block_K], A_L0[kk % S2, :, :])
     T.copy(B_L1[k % S1, kk * block_K, 0], B_L0[kk % S2, :, :])
-    
+
     # 使用 MMA intrinsic 进行矩阵乘累加
-    T.mma(A_L0[kk % S2, :, :], B_L0[kk % S2, :, :], C_L0, 
-          init=T.And(k == 0, kk == 0))
+    T.mma(A_L0[kk % S2, :, :], B_L0[kk % S2, :, :], C_L0, init=T.And(k == 0, kk == 0))
 ```
 
 **收益**：
@@ -276,7 +276,7 @@ with T.Kernel(core_num, is_npu=True) as (cid, _):
         if cid < m_num * n_num:
             bx = cid // n_num
             by = cid % n_num
-            # 处理输出块 [bx * block_M : (bx+1) * block_M, 
+            # 处理输出块 [bx * block_M : (bx+1) * block_M,
             #            by * block_N : (by+1) * block_N]
 ```
 
@@ -313,7 +313,7 @@ S1 = 2            # L1 双缓冲深度
 S2 = 2            # L0 双缓冲深度
 
 # 分块层级
-GM (全局内存) → L1 [block_M, K_L1] / [K_L1, block_N] 
+GM (全局内存) → L1 [block_M, K_L1] / [K_L1, block_N]
              → L0 [block_M, block_K] / [block_K, block_N]
 ```
 
@@ -450,8 +450,8 @@ core_num = torch.npu.get_device_properties(0).cube_core_num
 
 ## 参考资料
 
-- 基础实现：`examples/gemm/example_gemm.py`
-- Intrinsic 优化：`examples/gemm/example_gemm_intrinsic.py`
+- 基础实现：`examples/ascend_a2a3/gemm/example_gemm.py`
+- Intrinsic 优化：`examples/ascend_a2a3/gemm/example_gemm_intrinsic.py`
 - API 参考：`.agents/skills/tilelang-custom-skill/tilelang-api-best-practices/SKILL.md`
 - 流水线同步：`.agents/skills/tilelang-custom-skill/tilelang-api-best-practices/references/api-schedule-sync.md`
 
@@ -484,11 +484,11 @@ core_num = torch.npu.get_device_properties(0).cube_core_num
 
 ```python
 # 模式 1：单缓冲同步
-T.copy(A, A_L1)          # MTE2: 生产者（GM → L1）
+T.copy(A, A_L1)  # MTE2: 生产者（GM → L1）
 T.set_flag("mte2", "mte1", 0)  # 通知 MTE1
 
-T.wait_flag("mte2", "mte1", 0) # MTE1: 消费者等待
-T.copy(A_L1, A_L0)       # MTE1: 使用数据（L1 → L0）
+T.wait_flag("mte2", "mte1", 0)  # MTE1: 消费者等待
+T.copy(A_L1, A_L0)  # MTE1: 使用数据（L1 → L0）
 
 # 模式 2：多缓冲轮转
 for k in T.serial(loop_k):

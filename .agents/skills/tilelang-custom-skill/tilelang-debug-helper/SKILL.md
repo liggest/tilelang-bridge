@@ -3,6 +3,8 @@ name: tilelang-debug-helper
 description: How to add debugging capabilities to TileLang Ascend example operators. Use this skill whenever the user asks to debug a TileLang example, add GDB debugging code, create a debug version of an example, or mentions GDB, debugging, breakpoints, or VSCode debugging in the context of TileLang operators. This skill covers adding debug code to Python examples, configuring CMakeLists.txt for C++ debugging, and setting up VSCode for Python + C++ joint debugging.
 ---
 
+> 适用范围：TA A2/A3 资产；主线 backend/build/IR/A5 技能保持独立。先读 docs/ascend_a2a3/migration.md，已有用户授权、模式与原配置优先；不重复请求同一批准，不因搬入本 skill 自动授权安装/外发/push/定时任务。
+
 # TileLang Debug Helper
 
 This skill helps you add debugging capabilities to TileLang Ascend example operators so they can be debugged with GDB in VSCode.
@@ -36,7 +38,7 @@ When a user wants to debug a TileLang example, they need to:
 
 ### Step 1: Read the Original Example
 
-First, read the example file that needs debugging. These are typically located in the `examples/` directory and end with `.py`.
+First, read the example file that needs debugging. These are typically located in the `examples/ascend_a2a3/` directory and end with `.py`.
 
 ### Step 2: Identify the Right Location
 
@@ -60,19 +62,11 @@ Save the modified file. Common naming conventions:
 
 ---
 
-## Part 2: Configuring CMakeLists.txt for C++ Debugging
+## Part 2: Isolated modern C++ Debug build
 
-To debug C++ code in TileLang, the project must be compiled with debug symbols (`-g`) and no optimizations (`-O0`).
+Use the current build skill and the local [Debug build recipe](examples/cmake-debug.md). Configure a separate build-debug with CMAKE_BUILD_TYPE=Debug and USE_ASCEND=ON; do not modify production CMakeLists.txt just to add -g/-O0 or run make clean against the user's build. Keep the existing Torch/TorchNPU/CANN pair.
 
-**Quick steps**:
-1. Locate `tilelang-ascend/CMakeLists.txt`
-2. Find `add_library(tilelang_objs OBJECT ${TILE_LANG_SRCS})`
-3. Add `target_compile_options(tilelang_objs PRIVATE -g -O0)` immediately after
-4. Rebuild
-
-**Complete CMake snippet + rebuild commands** see [examples/cmake-debug.md](examples/cmake-debug.md).
-
----
+Record the actual native and Cython loader paths before attaching GDB. A build-debug directory existing on disk does not prove the process loaded it. The current A2/A3 pass/codegen locations are src/ascend/a2a3; IR is TIRX.
 
 ## Part 3: Configuring VSCode for Python + C++ Joint Debugging
 
@@ -90,8 +84,8 @@ Plus a tasks.json that sources `set_env.sh` and exports env to `.env` before lau
 
 ### Step-by-Step Guide
 
-1. **Configure CMakeLists.txt** (if not already done)
-   - Add `target_compile_options(tilelang_objs PRIVATE -g -O0)`
+1. **Configure the separate Debug build** (if not already done)
+   - Use `-DCMAKE_BUILD_TYPE=Debug` in build-debug
    - Rebuild the project
 
 2. **Configure VSCode** (if not already done)
@@ -132,9 +126,9 @@ Plus a tasks.json that sources `set_env.sh` and exports env to `.env` before lau
 3. Confirm the debug code is placed before kernel execution
 4. The file should run and pause at the `input()` call
 
-### After Modifying CMakeLists.txt
+### After rebuilding Debug artifacts
 
-1. Verify the `target_compile_options` line is present
+1. Verify CMakeCache and the actually loaded native/Cython paths
 2. Rebuild the project successfully
 3. Debug symbols are present in the compiled binaries
 
@@ -172,7 +166,7 @@ Before starting debugging, ensure:
 - GDB installed (`sudo apt install gdb`)
 - VSCode with Python and C/C++ extensions
 - TileLang project compiled with debug information
-- CMakeLists.txt configured with `-g -O0`
+- Separate Debug build configured and its actual loader path confirmed
 - VSCode configured with launch.json and tasks.json
 
 ---
@@ -180,6 +174,6 @@ Before starting debugging, ensure:
 ## 子目录索引
 
 - [examples/python-debug-code.md](examples/python-debug-code.md) — Python debug snippet / complete example / 3 common patterns
-- [examples/cmake-debug.md](examples/cmake-debug.md) — CMakeLists.txt full snippet + rebuild commands
+- [examples/cmake-debug.md](examples/cmake-debug.md) — modern isolated Debug build + loader checks
 - [examples/vscode-config.md](examples/vscode-config.md) — launch.json + tasks.json full JSON + required extensions
 - [references/troubleshooting.md](references/troubleshooting.md) — Common debug-session failures by category (Python / C++ / VSCode)

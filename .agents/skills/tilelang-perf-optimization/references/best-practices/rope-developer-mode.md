@@ -205,6 +205,6 @@ T.reinterpretcast(mask_ub, mask_ub_i32, "uint32_t")
 
 ## 参考资料
 
-- 原始实现：`examples/pos_embedding/rope_mask.py`
-- 优化实现：`examples/pos_embedding/rope.py`
+- 原始实现：`examples/ascend_a2a3/pos_embedding/rope_mask.py`
+- 优化实现：`examples/ascend_a2a3/pos_embedding/rope.py`
 - API 参考：`.agents/skills/tilelang-custom-skill/tilelang-api-best-practices/SKILL.md`

@@ -33,7 +33,7 @@ AUTO_SYNC, MEMORY_PLANNING). No T.Scope / set_flag / wait_flag / barrier_all.
 """
 
 import tilelang
-import tilelang.language as T
+import tilelang.ascend.a2a3.language as T
 import torch
 
 pass_configs = {
@@ -357,7 +357,29 @@ def chunk_scaled_dot_kkt_fwd(
 # =============================================================================
 # Smoke test (CI entry; golden comparison is in test_chunk_scaled_dot_kkt.py)
 # =============================================================================
-if __name__ == "__main__":
+
+
+# CLI cache decisions belong to the invocation, including failed original cases.
+def _preserve_cache_state(function):
+    from functools import wraps
+
+    @wraps(function)
+    def invoke(*args, **kwargs):
+        from tilelang.env import CacheState
+
+        enabled = CacheState._enabled
+        try:
+            return function(*args, **kwargs)
+        finally:
+            CacheState._enabled = enabled
+
+    return invoke
+
+
+@_preserve_cache_state
+def main():
+    import torch_npu  # noqa: F401
+
     tilelang.disable_cache()
     torch.manual_seed(0)
     B, S, H, DK, chunk_size = 1, 32768, 32, 128, 64
@@ -391,3 +413,7 @@ if __name__ == "__main__":
     assert not torch.isnan(A).any(), "Output contains NaN"
     print(f"[smoke] output shape: {A.shape}, dtype: {A.dtype}")
     print("Test Passed!")
+
+
+if __name__ == "__main__":
+    main()

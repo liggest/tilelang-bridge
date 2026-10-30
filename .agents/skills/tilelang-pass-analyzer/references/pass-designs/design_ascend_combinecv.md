@@ -1,3 +1,5 @@
+> TA 0deb8b93 来源算法参考：本页行号、旧IR与注册代码是原版本资料，不能作为当前可编译模板。现行接口以本地pipeline/native源码、main IR技能和pass-generate/references/integration-points.md为准。
+
 # CombineCV and Ascend resource-scope verification
 
 This reference owns the implementation design of the shared C/V resource classifier, `CombineCV`,

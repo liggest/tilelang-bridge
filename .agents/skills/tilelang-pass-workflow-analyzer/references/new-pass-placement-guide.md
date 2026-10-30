@@ -3,7 +3,7 @@
 This guide decides *where* a pass belongs. Mechanical registration and wrapper templates belong to
 `tilelang-pass-generate/references/integration-points.md`.
 
-Always confirm the current sequence in `tilelang/engine/phase.py` before editing it.
+Always confirm the current sequence in `tilelang/ascend/a2a3/pipeline.py` before editing it.
 
 ## 1. Describe the pass contract
 

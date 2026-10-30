@@ -68,8 +68,8 @@ def kernel(...):
 
 ```python
 with T.Kernel(block_num, is_npu=True) as (cid, vid):
-	# 每个 cid 只处理一个 block
-	...
+    # 每个 cid 只处理一个 block
+    ...
 ```
 
 **性能原因**：逻辑任务数远高于物理核数时，按任务数 launch 会放大 kernel 初始化、workspace 分配、地址计算和同步开销。很多临时 buffer 还会随 `block_num` 线性膨胀，而同一时刻实际只会有物理 core 数量的任务并行执行。
@@ -80,11 +80,11 @@ with T.Kernel(block_num, is_npu=True) as (cid, vid):
 core_num = 24
 
 with T.Kernel(core_num, is_npu=True) as (cid, vid):
-	single_core_load = T.ceildiv(block_num, core_num)
-	for block_idx in T.serial(cid * single_core_load, (cid + 1) * single_core_load):
-		if block_idx < block_num:
-			# 处理逻辑任务 block_idx
-			...
+    single_core_load = T.ceildiv(block_num, core_num)
+    for block_idx in T.serial(cid * single_core_load, (cid + 1) * single_core_load):
+        if block_idx < block_num:
+            # 处理逻辑任务 block_idx
+            ...
 ```
 
 **检查点**：
@@ -98,7 +98,7 @@ with T.Kernel(core_num, is_npu=True) as (cid, vid):
 
 ```python
 with T.Kernel(24, is_npu=True) as (cid, vid):
-	...
+    ...
 ```
 
 **性能原因**：空闲 core 不做有效计算，但仍会进入 kernel、执行部分初始化和分支判断；如果存在全局同步或 workspace 初始化，空 core 还可能放大等待和资源占用。
@@ -109,8 +109,8 @@ with T.Kernel(24, is_npu=True) as (cid, vid):
 launch_core_num = T.min(block_num, 24)
 
 with T.Kernel(launch_core_num, is_npu=True) as (cid, vid):
-	# cid 天然落在有效任务范围内
-	...
+    # cid 天然落在有效任务范围内
+    ...
 ```
 
 如果 `block_num` 是 Python 侧静态整数，也可以直接在 host 侧计算：
@@ -119,7 +119,7 @@ with T.Kernel(launch_core_num, is_npu=True) as (cid, vid):
 core_num = min(block_num, 24)
 
 with T.Kernel(core_num, is_npu=True) as (cid, vid):
-	...
+    ...
 ```
 
 ---
@@ -130,7 +130,7 @@ with T.Kernel(core_num, is_npu=True) as (cid, vid):
 
 ```python
 for row in range(block_M):
-	T.tile.sub(acc_ub[row, :], acc_ub[row, :], max_ub[row])
+    T.tile.sub(acc_ub[row, :], acc_ub[row, :], max_ub[row])
 ```
 
 **性能原因**：每一行/每个元素单独发起一次指令，会降低 Vector 指令利用率，并引入大量 scalar 地址计算、循环控制和指令下发开销。Vector Core 更适合一次处理连续 tile。
@@ -180,20 +180,20 @@ T.sync_all()
 
 ```python
 for i in T.serial(num_blocks):
-	T.copy(src[i, :], ub_tmp)
-	T.barrier_all()
-	T.tile.add(out_ub, out_ub, ub_tmp)
-	T.barrier_all()
+    T.copy(src[i, :], ub_tmp)
+    T.barrier_all()
+    T.tile.add(out_ub, out_ub, ub_tmp)
+    T.barrier_all()
 ```
 
 **改写示意**：只在真正需要消费搬运结果的位置等待，或改成流水/双 buffer。
 
 ```python
 for i in T.serial(num_blocks):
-	side = i % 2
-	T.copy(src[i, :], ub_tmp[side, :])
-	# 若开启自动同步且生成代码正确，可不手写 barrier。
-	T.tile.add(out_ub, out_ub, ub_tmp[side, :])
+    side = i % 2
+    T.copy(src[i, :], ub_tmp[side, :])
+    # 若开启自动同步且生成代码正确，可不手写 barrier。
+    T.tile.add(out_ub, out_ub, ub_tmp[side, :])
 ```
 
 **检查点**：先验证同步是否必需，再删改；如果关闭自动同步或进入 Expert 模式，必须通过生成的 Ascend C 代码和精度测试确认同步语义没有被破坏。
@@ -225,7 +225,7 @@ T.tile.mul_add_dst(acc_ub, x_ub, w_ub)  # acc_ub = x_ub * w_ub + acc_ub
 T.tile.axpy(dst_ub, src_ub, scale)  # dst_ub = scale * src_ub + dst_ub
 ```
 
-注意：PTO 后端场景若没有 `axpy`，优先确认能否使用 `mul_add_dst` 等价表达；所有接口以 `tilelang/language/ascend_tile.py` 为准。
+注意：PTO 后端场景若没有 `axpy`，优先确认能否使用 `mul_add_dst` 等价表达；所有接口以 `tilelang/ascend/a2a3/language/ascend_tile.py` 为准。
 
 ### `max(x, 0)` pattern
 
@@ -311,10 +311,10 @@ L0C 使用量 = block_M * block_N * accum_dtype_bytes * stages
 
 ```python
 for k in T.serial(loop_k):
-	# AIC: compute and write workspace
-	...
-	# AIV: read workspace and vector compute
-	...
+    # AIC: compute and write workspace
+    ...
+    # AIV: read workspace and vector compute
+    ...
 ```
 
 **性能原因**：CV 融合算子的 AIC 和 AIV 通过 workspace 串接。如果没有核间流水，Vector 往往要等 Cube 产出，Cube 也可能等 Vector 消费，形成明显核间气泡。
@@ -323,16 +323,16 @@ for k in T.serial(loop_k):
 
 ```python
 pass_configs = {
-	tilelang.PassConfigKey.TL_ASCEND_AUTO_SYNC: True,
-	tilelang.PassConfigKey.TL_ASCEND_MEMORY_PLANNING: True,
-	tilelang.PassConfigKey.TL_ASCEND_AUTO_CV_SYNC: True,
+    tilelang.PassConfigKey.TL_ASCEND_AUTO_SYNC: True,
+    tilelang.PassConfigKey.TL_ASCEND_MEMORY_PLANNING: True,
+    tilelang.PassConfigKey.TL_ASCEND_AUTO_CV_SYNC: True,
 }
 
 for k in T.Pipelined(loop_k, num_stages=2):
-	# AIC: write workspace for iteration k
-	...
-	# AIV: read previous/ready workspace and compute
-	...
+    # AIC: write workspace for iteration k
+    ...
+    # AIV: read previous/ready workspace and compute
+    ...
 ```
 
 **调参建议**：
@@ -349,9 +349,9 @@ for k in T.Pipelined(loop_k, num_stages=2):
 
 ```python
 for i in T.serial(loop_n):
-	T.copy(x[i, :], x_ub)
-	T.tile.exp(y_ub, x_ub)
-	T.copy(y_ub, y[i, :])
+    T.copy(x[i, :], x_ub)
+    T.tile.exp(y_ub, x_ub)
+    T.copy(y_ub, y[i, :])
 ```
 
 **性能原因**：纯 AIV 算子常常 memory bound。如果搬入、计算、搬出完全串行，Vector 计算无法掩盖 GM/UB 搬运延迟，MTE 和 Vector pipeline 都容易出现空泡。
@@ -360,9 +360,9 @@ for i in T.serial(loop_n):
 
 ```python
 for i in T.Pipelined(loop_n, num_stages=2):
-	T.copy(x[i, :], x_ub)
-	T.tile.exp(y_ub, x_ub)
-	T.copy(y_ub, y[i, :])
+    T.copy(x[i, :], x_ub)
+    T.tile.exp(y_ub, x_ub)
+    T.copy(y_ub, y[i, :])
 ```
 
 **替代写法 B：手动双 buffer**
@@ -397,9 +397,9 @@ with T.Scope("V"):
 ```python
 # ❌ 多行 tile 循环内逐块归约
 for si in T.serial(s_num):
-    T.copy(src[...], buf_cal)               # [rows, block_S]
+    T.copy(src[...], buf_cal)  # [rows, block_S]
     T.reduce_sum(buf_cal, col_buf, dim=-1)  # [rows, 1]
-    T.reduce_sum(col_buf, scalar, dim=0)    # dim=0 行为不确定！
+    T.reduce_sum(col_buf, scalar, dim=0)  # dim=0 行为不确定！
     T.tile.add(total, total, scalar)
 ```
 
@@ -413,12 +413,12 @@ accum = T.alloc_ub([rows, block_S], cal_dtype)
 T.tile.fill(accum, 0.0)
 for si in T.serial(s_num):
     T.copy(src[...], buf_cal)
-    T.tile.add(accum, accum, buf_cal)   # 只累积
+    T.tile.add(accum, accum, buf_cal)  # 只累积
 
 # 循环外
 row_buf = T.alloc_ub([rows], cal_dtype)
 result = T.alloc_ub([1], cal_dtype)
-T.reduce_sum(accum, row_buf, dim=-1)   # [rows, block_S] → [rows]
+T.reduce_sum(accum, row_buf, dim=-1)  # [rows, block_S] → [rows]
 T.reduce_sum(row_buf, result, dim=-1)  # [rows] → scalar
 ```
 
@@ -434,7 +434,7 @@ T.reduce_sum(row_buf, result, dim=-1)  # [rows] → scalar
 # ❌ 正交轴被串行化，内层是标量操作
 for r in range(sub_block_R):
     for i in range(1, L):
-        if a[r, i] <= v[r, i - 1]:    # 标量 if-else
+        if a[r, i] <= v[r, i - 1]:  # 标量 if-else
             v[r, i] = a[r, i]
             idx[r, i] = i
         else:
@@ -453,10 +453,10 @@ for r in range(sub_block_R):
 ```python
 # ✅ 正交轴向量化：transpose [Rows, L] -> [L, Rows]，向量扫描
 for j in range(1, L):
-    T.copy(A[j, col_base:col_base + N], curr_ub)      # N 行连续
+    T.copy(A[j, col_base : col_base + N], curr_ub)  # N 行连续
     T.tile.compare(mask, curr_cal, run_min_cal, "LE")  # 向量比较
-    T.tile.select(run_idx, mask, idx_curr, run_idx, ...) # 向量选择
-    T.tile.min(run_min_cal, run_min_cal, curr_cal)     # 向量 min (NaN 正确传播)
+    T.tile.select(run_idx, mask, idx_curr, run_idx, ...)  # 向量选择
+    T.tile.min(run_min_cal, run_min_cal, curr_cal)  # 向量 min (NaN 正确传播)
 ```
 
 **检查点**：
@@ -516,7 +516,7 @@ C/V scope 验证。保留最小复现并修复 compiler contract。
 
 ```text
 - 关注项：Vector for loop 逐行计算
-- 位置：examples/<op>/<file>.py::<kernel>
+- 位置：examples/ascend_a2a3/<op>/<file>.py::<kernel>
 - shape/dtype：...
 - 暂不修改原因：UB 余量不足，broadcast 后可能超限
 - 后续方案：减小其他临时 buffer 或改用分块 broadcast，再验证精度和性能

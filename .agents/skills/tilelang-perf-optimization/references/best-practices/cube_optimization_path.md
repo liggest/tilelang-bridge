@@ -18,11 +18,11 @@
 
 ```python
 # Expert 模式标识：
-T.alloc_L0A(...)          # 显式分配 L0A
-T.alloc_L0B(...)          # 显式分配 L0B
-T.mma(A_L0, B_L0, C_L0)   # 使用 T.mma intrinsic
-T.set_flag(...)            # 手动 flag 同步
-T.wait_flag(...)           # 手动 flag 同步
+T.alloc_L0A(...)  # 显式分配 L0A
+T.alloc_L0B(...)  # 显式分配 L0B
+T.mma(A_L0, B_L0, C_L0)  # 使用 T.mma intrinsic
+T.set_flag(...)  # 手动 flag 同步
+T.wait_flag(...)  # 手动 flag 同步
 
 # Developer 模式标识：
 T.gemm_v0(A_L1, B_L1, C_L0)  # 使用 T.gemm_v0 高层抽象
@@ -53,7 +53,7 @@ Step 2: +整体双缓冲 + 三级K分块（不可分割）
   → 重新评估 tiling：block_K=128 双缓冲时 L0B 溢出
   → 调整为 block_K=64, K_L1=256（= block_K × 4）
   → 性能：0.95x（+48.8%）
-  
+
   变体：预取双缓冲（L0 层预取重叠）❌ 不推荐
   → 在整体双缓冲基础上，循环外预取 kk=0，循环内预取 kk+1
   → copy[kk+1] 和 mma[kk] 重叠执行
@@ -244,10 +244,12 @@ block_M = 128, block_N = 256, block_K = 64, K_L1 = 256, S1 = 2, S2 = 2
 
 ```python
 # 错误：block_M × block_N × 4 > 128KB
-block_M = 256; block_N = 256  # L0C = 256KB > 128KB ❌
+block_M = 256
+block_N = 256  # L0C = 256KB > 128KB ❌
 
 # 正确
-block_M = 128; block_N = 256  # L0C = 128KB ✅
+block_M = 128
+block_N = 256  # L0C = 128KB ✅
 ```
 
 #### 陷阱 2: 加双缓冲后未重新评估 tiling
@@ -319,10 +321,10 @@ for kk in T.serial(loop_kk):
 | `block_M` | M 维度 tile 大小 | 128 | 固定，受 L0C 约束 |
 | `block_N` | N 维度 tile 大小 | 256 | 固定，受 L0C 约束 |
 | `K_L1` | GM→L1 搬运粒度 | 128 | 需 > kL0Size 才能触发 ping-pong |
-| `kL0Size` | L0 层切片大小（内部参数） | 128 | 需小于K_L1；非前端参数，可去往 `src/tl_templates/ascend/common.h` 的 `constexpr uint32_t kL0Size`进行修改|
+| `kL0Size` | L0 层切片大小（内部参数） | 128 | 需小于K_L1；非前端参数，可去往 `src/ascend/a2a3/tl_templates/ascend/common.h` 的 `constexpr uint32_t kL0Size`进行修改|
 
 > ⚠️ **框架级改动提示（若按本条修改了 common.h，完成后必须告知用户）**
-> `kL0Size` 位于框架文件 `src/tl_templates/ascend/common.h`，并非算子前端参数。若 agent 依据本 skill 修改了该文件，请在完成后主动向用户输出以下说明：
+> `kL0Size` 位于框架文件 `src/ascend/a2a3/tl_templates/ascend/common.h`，并非算子前端参数。若 agent 依据本 skill 修改了该文件，请在完成后主动向用户输出以下说明：
 > - 此改动是**框架级的**，会影响所有调用 `gemm_v0` 的算子（不限于当前算子）；
 > - 理论上该改动只会让性能**更好、不会劣化**；
 > - 理论上只要生成算子即可，修改 common.h 属临时手段；该处已向 common.h 负责人提交 issue，**后续框架会对此处进行优化**，届时算子侧无需再改 common.h。
@@ -364,7 +366,7 @@ for kk in T.serial(loop_kk):
 ```
 
 > ⚠️ **框架级改动提示（若按"正确方案 A"修改了 common.h，完成后必须告知用户）**
-> `kL0Size` 位于框架文件 `src/tl_templates/ascend/common.h`，并非算子前端参数。若 agent 依据本 skill 修改了该文件，请在完成后主动向用户输出以下说明：
+> `kL0Size` 位于框架文件 `src/ascend/a2a3/tl_templates/ascend/common.h`，并非算子前端参数。若 agent 依据本 skill 修改了该文件，请在完成后主动向用户输出以下说明：
 > - 此改动是**框架级的**，会影响所有调用 `gemm_v0` 的算子（不限于当前算子）；
 > - 理论上该改动只会让性能**更好、不会劣化**；
 > - 理论上只要生成算子即可，修改 common.h 属临时手段；该处已向 common.h 负责人提交 issue，**后续框架会对此处进行优化**，届时算子侧无需再改 common.h。
@@ -407,11 +409,12 @@ Fixed Core 的收益本质上是**省掉一笔固定开销（约 200us）**，�
 
 ```python
 core_num = 20  # 910B 物理核数
+
+
 @T.prim_func
 def main(A, B, C):
     # 1. 固定核数core_num
     with T.Kernel(core_num, is_npu=True) as (cid, _):
-        
         # ... buffer申请 ...
 
         with T.Scope("C"):
@@ -554,8 +557,7 @@ L1 层约束（K_L1 独立选择）：
 ### 给定 dtype 和 accum_dtype，快速计算最优 tiling
 
 ```python
-def compute_optimal_tiling(dtype_size, accum_size, L0C_capacity=128*1024, L0AB_capacity=64*1024,
-                           use_double_buffer=False):
+def compute_optimal_tiling(dtype_size, accum_size, L0C_capacity=128 * 1024, L0AB_capacity=64 * 1024, use_double_buffer=False):
     """
     计算最优 tiling 参数。
     约束联立：
@@ -579,7 +581,7 @@ def compute_optimal_tiling(dtype_size, accum_size, L0C_capacity=128*1024, L0AB_c
     FRACTAL = 16  # 分形对齐（fp16 M/N/K ≥ 16 且为 16 倍数），向下取整不会爆容量
 
     # Step 1: 从 L0C 约束推导 block_M, block_N，尽量打满 L0C
-    max_l0c_elems = L0C_capacity // accum_size          # fp32: 128K/4 = 32768
+    max_l0c_elems = L0C_capacity // accum_size  # fp32: 128K/4 = 32768
     # 采用 M:N = 1:2（GEMM 常用；打满 L0C 同时不撑爆 L0A）：2·block_M² ≤ max_l0c_elems
     block_M = int((max_l0c_elems / 2) ** 0.5)
     block_M = max(FRACTAL, (block_M // FRACTAL) * FRACTAL)  # 对齐 → 128
@@ -597,6 +599,7 @@ def compute_optimal_tiling(dtype_size, accum_size, L0C_capacity=128*1024, L0AB_c
     K_L1 = block_K * 2
 
     return block_M, block_N, block_K, K_L1
+
 
 # 示例：fp16 + fp32 累加
 # 单缓冲

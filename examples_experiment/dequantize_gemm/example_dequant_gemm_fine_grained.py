@@ -1,10 +1,8 @@
 import argparse
 
 import tilelang as tl
-import tilelang.language as T
+import tilelang.ascend.a2a3.language as T
 import torch
-
-tl.cache.clear_cache()
 
 
 def torch_unpack_uint4_to_fp16(tensor: torch.Tensor) -> torch.Tensor:
@@ -478,4 +476,8 @@ def main(custom_args=None):
 
 
 if __name__ == "__main__":
+    import torch_npu  # noqa: F401
+    from tilelang.ascend.a2a3.kernel_cache import A2A3CythonKernelCache
+
+    A2A3CythonKernelCache().clear_cache()
     main()

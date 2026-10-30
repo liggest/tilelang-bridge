@@ -1,3 +1,5 @@
+> TA 0deb8b93 来源算法参考：本页行号、旧IR与注册代码是原版本资料，不能作为当前可编译模板。现行接口以本地pipeline/native源码、main IR技能和pass-generate/references/integration-points.md为准。
+
 # Ascend Memory Planning Pass 技术说明文档
 
 **源码位置**：`src/transform/ascend_memory_planning.cc`
@@ -268,7 +270,7 @@ vector<pair<size_t, size_t>> free_blocks_;               // 空闲块列表
 
 ```
 输入：函数属性 address_map = {bufD: 5000}
-  
+
 处理流程：
   1. SetPreAllocBuffer() 检测到 bufD 有预分配地址
   2. CheckConflict() 检查与其他分配是否地址重叠
@@ -488,28 +490,31 @@ pass_configs = {
     tilelang.PassConfigKey.TL_ASCEND_MEMORY_PLANNING: True,
 }
 
+
 @tilelang.jit(out_idx=[2], pass_configs=pass_configs)
 def test_memory(M=128, N=128, K=128):
     @T.prim_func
     def main(
-        A: T.Tensor((M, K), 'float16'),
-        B: T.Tensor((K, N), 'float16'),
-        C: T.Tensor((M, N), 'float16'),
+        A: T.Tensor((M, K), "float16"),
+        B: T.Tensor((K, N), "float16"),
+        C: T.Tensor((M, N), "float16"),
     ):
         with T.Kernel(1, is_npu=True) as (cid, vid):
-            a_l1 = T.alloc_L1((M, K), 'float16')
-            b_l1 = T.alloc_L1((K, N), 'float16')
-            c_l0c = T.alloc_L0C((M, N), 'float')
+            a_l1 = T.alloc_L1((M, K), "float16")
+            b_l1 = T.alloc_L1((K, N), "float16")
+            c_l0c = T.alloc_L0C((M, N), "float")
             T.copy(A, a_l1)
             T.copy(B, b_l1)
             T.gemm_v0(a_l1, b_l1, c_l0c)
             T.copy(c_l0c, C)
+
     return main
+
 
 func = test_memory()
 mod = func.ir_module
-print('address_map:', mod['main'].attrs.get('address_map'))
-print('size_map:', mod['main'].attrs.get('size_map'))
+print("address_map:", mod["main"].attrs.get("address_map"))
+print("size_map:", mod["main"].attrs.get("size_map"))
 ```
 
 ---

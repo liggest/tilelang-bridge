@@ -19,7 +19,7 @@
 ## 2. C++ Debugging Issues
 
 **Problem**: Breakpoints don't work in C++ code
-- **Solution**: 
+- **Solution**:
   - Verify `target_compile_options(tilelang_objs PRIVATE -g -O0)` is in CMakeLists.txt
   - Rebuild the project after modifying CMakeLists.txt
   - Ensure GDB is installed: `sudo apt install gdb`
@@ -42,7 +42,7 @@
   - Verify the Python process is running when attaching
 
 **Problem**: Can't find the Python process
-- **Solution**: 
+- **Solution**:
   - Run the Python debug configuration first
   - Wait for the PID to be printed
   - Then attach GDB

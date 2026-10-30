@@ -1,49 +1,12 @@
-# CMakeLists.txt Debug Configuration
+# 现代 A2/A3 CMake 调试构建
 
-## Understanding the Requirement
-
-To debug C++ code in TileLang, the project must be compiled with:
-- Debug symbols (`-g`)
-- No optimizations (`-O0`)
-
-This allows GDB to properly inspect variables and step through code.
-
-## Step 1: Locate CMakeLists.txt
-
-The file is located at: `tilelang-ascend/CMakeLists.txt`
-
-## Step 2: Find the Target Library
-
-Search for the line:
-```cmake
-add_library(tilelang_objs OBJECT ${TILE_LANG_SRCS})
-```
-
-## Step 3: Add Debug Compilation Options
-
-Add the following line immediately after the `add_library` line:
-```cmake
-target_compile_options(tilelang_objs PRIVATE -g -O0)
-```
-
-## Complete Example
-
-```cmake
-# ... previous content ...
-
-add_library(tilelang_objs OBJECT ${TILE_LANG_SRCS})
-target_compile_options(tilelang_objs PRIVATE -g -O0)
-
-# ... rest of the file ...
-```
-
-## Step 4: Rebuild the Project
-
-After modifying CMakeLists.txt, rebuild the project to apply the changes:
+不修改根CMakeLists来硬塞全局`-g -O0`，也不清理用户正在使用的build。按主线build技能准备依赖，在独立目录配置：
 
 ```bash
-cd build
-make clean
-cmake ..
-make -j$(nproc)
+cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug -DUSE_ASCEND=ON -DUSE_CUDA=OFF -DUSE_ROCM=OFF -DUSE_METAL=OFF -DUSE_LLVM=OFF
+cmake --build build-debug -j8
 ```
+
+dev默认loader查build/lib与build/tvm；要调试独立目录，先按实际loader配置选择该构建产物并记录/proc maps、Cython路径，不能从文件存在推断已装载。不要借用原TA旧库冒充当前重编。
+
+GDB/VSCode可保原Python PID等待与断点流程，但断点位置是src/ascend/a2a3的实际pass/codegen，IR为TIRX。修改C++后构建对应产物，再用原factory和配置复现。调试程序不得自动清全局kernel cache或更改SDK环境。

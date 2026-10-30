@@ -10,40 +10,40 @@
 
 | Pass 名称 | 注册名 | Python 函数 | C++ 文件 | 配置键 |
 |-----------|--------|-------------|---------|--------|
-| VectorizeLoop | tl.transform.VectorizeLoop | `VectorizeLoop(enable_vectorize)` | `vectorize_loop.cc` | `tir.disable_vectorize` |
-| LoopVectorizeDynamic | tl.transform.LoopVectorizeDynamic | `LoopVectorizeDynamic()` | `loop_vectorize_dynamic.cc` | - |
+| VectorizeLoop | tl.transform.A2A3VectorizeLoop | `VectorizeLoop(enable_vectorize)` | `vectorize_loop.cc` | `tir.disable_vectorize` |
+| LoopVectorizeDynamic | tl.transform.A2A3LoopVectorizeDynamic | `LoopVectorizeDynamic()` | `loop_vectorize_dynamic.cc` | - |
 | LoopPartition | tl.transform.LoopPartition | `LoopPartition()` | `loop_partition.cc` | - |
 
 ### 内存优化类
 
 | Pass 名称 | 注册名 | Python 函数 | C++ 文件 | 配置键 |
 |-----------|--------|-------------|---------|--------|
-| FlattenBuffer | tl.transform.FlattenBuffer | `FlattenBuffer()` | `flatten_buffer.cc` | - |
-| LegalizeSafeMemoryAccess | tl.transform.LegalizeSafeMemoryAccess | `LegalizeSafeMemoryAccess()` | `legalize_safe_memory_access.cc` | `tl.disable_safe_memory_legalize` |
-| LegalizeVectorizedLoop | tl.transform.LegalizeVectorizedLoop | `LegalizeVectorizedLoop()` | `legalize_vectorized_loop.cc` | - |
+| FlattenBuffer | tl.transform.A2A3FlattenBuffer | `FlattenBuffer()` | `flatten_buffer.cc` | - |
+| LegalizeSafeMemoryAccess | tl.transform.A2A3LegalizeSafeMemoryAccess | `LegalizeSafeMemoryAccess()` | `legalize_safe_memory_access.cc` | `tl.disable_safe_memory_legalize` |
+| LegalizeVectorizedLoop | tl.transform.A2A3LegalizeVectorizedLoop | `LegalizeVectorizedLoop()` | `legalize_vectorized_loop.cc` | - |
 
 ### 流水线类
 
 | Pass 名称 | 注册名 | Python 函数 | C++ 文件 | 配置键 |
 |-----------|--------|-------------|---------|--------|
-| PipelinePlanning | tl.transform.PipelinePlanning | `PipelinePlanning()` | `pipeline_planning.cc` | - |
-| InjectSoftwarePipeline | tl.transform.InjectSoftwarePipeline | `InjectSoftwarePipeline()` | `inject_pipeline.cc` | `tl.disable_dynamic_tail_split` |
+| PipelinePlanning | tl.transform.A2A3PipelinePlanning | `PipelinePlanning()` | `pipeline_planning.cc` | - |
+| InjectSoftwarePipeline | tl.transform.A2A3InjectSoftwarePipeline | `InjectSoftwarePipeline()` | `inject_pipeline.cc` | `tl.disable_dynamic_tail_split` |
 
 ### Layout 与 Lowering 类
 
 | Pass 名称 | 注册名 | Python 函数 | C++ 文件 | 配置键 |
 |-----------|--------|-------------|---------|--------|
-| LayoutInference | tl.transform.LayoutInference | `LayoutInference()` | `layout_inference.cc` | - |
-| LowerTileOp | tl.transform.LowerTileOp | `LowerTileOp()` | `lower_tile_op.cc` | - |
-| LowerDeviceStorageAccessInfo | tl.transform.LowerDeviceStorageAccessInfo | `LowerDeviceStorageAccessInfo()` | `lower_device_storage_access_info.cc` | - |
+| LayoutInference | tl.transform.A2A3LayoutInference | `LayoutInference()` | `layout_inference.cc` | - |
+| LowerTileOp | tl.transform.A2A3LowerTileOp | `LowerTileOp()` | `lower_tile_op.cc` | - |
+| LowerDeviceStorageAccessInfo | tl.transform.A2A3LowerDeviceStorageAccessInfo | `LowerDeviceStorageAccessInfo()` | `lower_device_storage_access_info.cc` | - |
 
 ### 前端与后端类
 
 | Pass 名称 | 注册名 | Python 函数 | C++ 文件 | 配置键 |
 |-----------|--------|-------------|---------|--------|
-| FrontendLegalize | tl.transform.FrontendLegalize | `FrontendLegalize()` | `frontend_legalize.cc` | - |
+| FrontendLegalize | tl.transform.A2A3FrontendLegalize | `FrontendLegalize()` | `frontend_legalize.cc` | - |
 | MakePackedAPI | tl.transform.MakePackedAPI | `MakePackedAPI()` | `make_packed_api.cc` | - |
-| AnnotateDeviceRegions | tl.transform.AnnotateDeviceRegions | `AnnotateDeviceRegions()` | `annotate_device_regions.cc` | - |
+| AnnotateDeviceRegions | tl.transform.A2A3AnnotateDeviceRegions | `AnnotateDeviceRegions()` | `annotate_device_regions.cc` | - |
 | Simplify | tl.Simplify | `Simplify()` | `simplify.cc` | `tl.Simplify` |
 
 ### 其他优化类
@@ -53,7 +53,7 @@
 | IfStmtBinding | tl.transform.IfStmtBinding | `IfStmtBinding()` | `if_stmt_binding.cc` | - |
 | MergeIfStmt | tl.transform.MergeIfStmt | `MergeIfStmt()` | `merge_if_stmt.cc` | - |
 | MultiVersionBuffer | tl.transform.MultiVersionBuffer | `MultiVersionBuffer()` | `multi_version_buffer_rewriter.cc` | - |
-| ConfigIndexBitwidth | tl.transform.ConfigIndexBitwidth | `ConfigIndexBitwidth()` | `config_index_bitwidth.cc` | `tl.config_index_bitwidth` |
+| ConfigIndexBitwidth | tl.transform.A2A3ConfigIndexBitwidth | `ConfigIndexBitwidth()` | `config_index_bitwidth.cc` | `tl.config_index_bitwidth` |
 
 ---
 
@@ -119,7 +119,7 @@
 - `VisitExpr_(BufferLoadNode/BufferStoreNode)` - 应用 layout 变换
 
 **Tile 操作 Lower 实现：**
-- 文件：`src/op/ascend.cc`
+- 文件：`src/ascend/a2a3/op/ascend.cc`
 - `AscendCopy::Lower()` - 将 T.copy 转换为具体 API（如 copy_gm_to_l1, copy_l1_to_l0a 等）
 - 其他 Tile 操作的 Lower 方法也在此文件中
 
@@ -148,7 +148,7 @@
 ## 文件路径汇总
 
 ```
-src/transform/
+src/ascend/a2a3/transform/
 ├── vectorize_loop.cc
 ├── loop_vectorize_dynamic.cc
 ├── loop_partition.cc

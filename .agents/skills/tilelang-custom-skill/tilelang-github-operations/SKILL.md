@@ -4,6 +4,8 @@ description: |
   GitHub 操作指南集合。支持的操作：(1) PR 工作流：提交代码、创建 Pull Request；(2) GitHub CLI 配置：安装、认证、Token 管理。触发关键词：PR、pull request、push、commit、gh 命令、GitHub CLI、提交代码、创建 PR 等。
 ---
 
+> 适用范围：TA A2/A3 资产；主线 backend/build/IR/A5 技能保持独立。先读 docs/ascend_a2a3/migration.md，已有用户授权、模式与原配置优先；不重复请求同一批准，不因搬入本 skill 自动授权安装/外发/push/定时任务。
+
 # GitHub 操作指南
 
 本技能提供 GitHub 操作的完整指导，帮助 AI Agent 正确执行 GitHub 相关任务。

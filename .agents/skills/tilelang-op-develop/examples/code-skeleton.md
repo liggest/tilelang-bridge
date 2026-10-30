@@ -2,10 +2,10 @@
 
 develop skill 生成**两个文件**（kernel 与 test 分离，便于阅读与各阶段职责隔离）：
 
-- `examples/{op}/{op}.py` —— **纯 kernel**（`@tilelang.jit` + `pass_configs`），可被 import，**不含 golden、不含测试、不含 `__main__`**
-- `examples/{op}/test_{op}.py` —— golden + 精度判定 + 分层测试套件（L0 + L1/L2/Boundary 桩）+ `main`（`--level` 入口）；从 `{op}.py` **import kernel**
+- `examples/ascend_a2a3/{op}/{op}.py` —— **纯 kernel**（`@tilelang.jit` + `pass_configs`），可被 import，**不含 golden、不含测试、不含 `__main__`**
+- `examples/ascend_a2a3/{op}/test_{op}.py` —— golden + 精度判定 + 分层测试套件（L0 + L1/L2/Boundary 桩）+ `main`（`--level` 入口）；从 `{op}.py` **import kernel**
 
-运行入口是 test 文件：`python examples/{op}/test_{op}.py --level {l0|all}`。
+运行入口是 test 文件：`python examples/ascend_a2a3/{op}/test_{op}.py --level {l0|all}`。
 
 ---
 
@@ -173,7 +173,7 @@ if __name__ == "__main__":
 | L0 / L1 | `[PRECISION_PASS]` | `[PRECISION_FAIL]` | 是（任一失败 → exit 1） |
 | L2 / Boundary | `[BOUNDARY_PASS]` | `[BOUNDARY_WARN]` | 否（仅记录，不影响退出码） |
 
-- 精度收敛阶段跑 `python examples/{op}/test_{op}.py --level l0`；扩展后跑 `--level all`。
+- 精度收敛阶段跑 `python examples/ascend_a2a3/{op}/test_{op}.py --level l0`；扩展后跑 `--level all`。
 - L2（负向）：非法输入**正确抛异常 = `[BOUNDARY_PASS]`**，静默接受 = `[BOUNDARY_WARN]`；不比精度。
 - Boundary（合法特殊值）：跑 kernel+golden **按精度标准比对**，精度不过 = `[BOUNDARY_WARN]`。
 - L2/Boundary 用例都 `try/except` 包裹、非阻塞，失败后**继续**，不得中断、不得改退出码。

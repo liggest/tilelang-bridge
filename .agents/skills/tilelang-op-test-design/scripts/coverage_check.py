@@ -202,8 +202,8 @@ def build_required(category, dtypes, attrs):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("example", help="examples/{op}/test_{op}.py")
-    ap.add_argument("--proto", default=None, help="examples/{op}/proto.yaml（可选，用于派生 dtype/attr 维度）")
+    ap.add_argument("example", help="examples/ascend_a2a3/{op}/test_{op}.py")
+    ap.add_argument("--proto", default=None, help="examples/ascend_a2a3/{op}/proto.yaml（可选，用于派生 dtype/attr 维度）")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
 

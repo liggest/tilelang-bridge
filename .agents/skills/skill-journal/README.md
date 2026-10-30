@@ -137,7 +137,7 @@ source: developer
 | `wrong_api_signature` | `skill` | API 签名/参数描述与实际不符 | `T.gemm_v0` 参数顺序错 |
 | `outdated_example` | `skill` | 示例代码已经跑不通或不是最佳写法 | broadcast 索引示例 shape 写错 |
 | `missing_api_doc` | `skill` | 完全没提到的 API | `T.tile.exp` 没收录 |
-| `unclear_workflow` | `skill` | 工作流步骤模糊或漏检查 | 没说"先搜 examples/" 的强制顺序 |
+| `unclear_workflow` | `skill` | 工作流步骤模糊或漏检查 | 没说"先搜 examples/ascend_a2a3/" 的强制顺序 |
 | `mode_misjudgment` | `skill` | 编程模式选型描述误导 | 把混合算子说成可用 Developer 单模式 |
 | `pass_config_gap` | `skill` | pass_configs 配置说明不全 | 没提 `AUTO_CV_SYNC` 必须配 `AUTO_CV_COMBINE` |
 | `runtime_error_recipe` | `troubleshooting` | 具体错误信息有可复用的解决方案 | `Memory allocation failed required: 245760` → 减小 block_M |

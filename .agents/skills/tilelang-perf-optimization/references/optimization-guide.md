@@ -212,9 +212,9 @@ pass_configs = {
 }
 
 # 分配双缓冲（GM↔UB 的 buffer 双份，V pipe 中间 buffer 单份）
-input_buf = T.alloc_ub([2, block_size], dtype)     # MTE2 写入目标 → 双份
-compute_buf = T.alloc_ub([block_size], "float32")   # 仅 V pipe → 单份
-output_buf = T.alloc_ub([2, block_size], dtype)     # MTE3 读出源 → 双份
+input_buf = T.alloc_ub([2, block_size], dtype)  # MTE2 写入目标 → 双份
+compute_buf = T.alloc_ub([block_size], "float32")  # 仅 V pipe → 单份
+output_buf = T.alloc_ub([2, block_size], dtype)  # MTE3 读出源 → 双份
 
 # 初始化：允许 MTE2 读第 0/1 块
 T.set_flag("mte3", "mte2", 0)
@@ -234,7 +234,7 @@ for si in T.serial(1, loop_k):
         T.set_flag("mte2", "v", nxt)
     # 消费第 si-1 块（cur）
     T.wait_flag("mte2", "v", cur)
-    T.tile.exp(compute_buf, input_buf[cur, :])   # V pipe 单缓冲安全
+    T.tile.exp(compute_buf, input_buf[cur, :])  # V pipe 单缓冲安全
     T.copy(compute_buf, output_buf[cur, :])
     T.set_flag("v", "mte3", cur)
     T.wait_flag("v", "mte3", cur)
@@ -334,7 +334,7 @@ for k in T.serial(1, loop_k):
 for n_iter in T.serial(T):
     for k in T.serial(loop_k):
         T.copy(A[bz, by, :, :], a_l1)  # 每轮重复搬运
-        T.copy(K[bz, by, k * block_N:(k + 1) * block_N, :], k_l1)
+        T.copy(K[bz, by, k * block_N : (k + 1) * block_N, :], k_l1)
         T.gemm_v0(a_l1, k_l1, acc_l0c, transpose_B=True)
 ```
 
@@ -346,7 +346,7 @@ T.copy(A[bz, by, :, :], a_l1)
 for n_iter in T.serial(T):
     for k in T.serial(loop_k):
         # A 已驻留，跳过搬运
-        T.copy(K[bz, by, k * block_N:(k + 1) * block_N, :], k_l1)
+        T.copy(K[bz, by, k * block_N : (k + 1) * block_N, :], k_l1)
         T.gemm_v0(a_l1, k_l1, acc_l0c, transpose_B=True)
 ```
 
@@ -362,8 +362,8 @@ for n_iter in T.serial(T):
 **优化前**（每轮都搬小块 scale）：
 ```python
 for k in T.serial(loop_k):
-    T.copy(scale[k * base_scale:(k + 1) * base_scale], scale_l1)  # 每次 2 KB
-    T.copy(data[k * block_N:(k + 1) * block_N, :], data_l1)
+    T.copy(scale[k * base_scale : (k + 1) * base_scale], scale_l1)  # 每次 2 KB
+    T.copy(data[k * block_N : (k + 1) * block_N, :], data_l1)
     T.gemm_v0(data_l1, scale_l1, acc_l0c)
 ```
 
@@ -372,9 +372,9 @@ for k in T.serial(loop_k):
 # 合并 8 轮 scale 一次搬运（2 KB × 8 = 16 KB）
 for k in T.serial(loop_k):
     if k % 8 == 0:
-        T.copy(scale[k * base_scale:(k + 8) * base_scale], scale_l1_merged)
+        T.copy(scale[k * base_scale : (k + 8) * base_scale], scale_l1_merged)
     # 从合并 buffer 中按偏移取对应片
-    T.copy(data[k * block_N:(k + 1) * block_N, :], data_l1)
+    T.copy(data[k * block_N : (k + 1) * block_N, :], data_l1)
     T.gemm_v0(data_l1, scale_l1_merged[k % 8], acc_l0c)
 ```
 
@@ -550,7 +550,7 @@ pass_configs = {
 def find_max_tile(total_dim, fixed_dim, N_cal, N_input, dtype_str):
     """根据 UB 容量反推最大 tile 尺寸。"""
     UB_BUDGET = 192 * 1024
-    cal_bytes   = 4 if dtype_str in ("float16", "bfloat16") else int(dtype_str[-2:]) // 8
+    cal_bytes = 4 if dtype_str in ("float16", "bfloat16") else int(dtype_str[-2:]) // 8
     input_bytes = cal_bytes if dtype_str == "float32" else 2
     c = max(fixed_dim, 1)
     per_unit = c * (N_cal * cal_bytes + N_input * input_bytes)
@@ -592,8 +592,7 @@ def find_max_tile(total_dim, fixed_dim, N_cal, N_input, dtype_str):
 _VEC_ALIGN = 64  # 256B compare 对齐（fp32: 64*4=256B）
 
 # N 是 JIT 编译期常量，sel_mode 在编译时就确定了
-sel_mode = "VSEL_CMPMASK_SPR" if (N <= _VEC_ALIGN and dtype != "int32") \
-           else "VSEL_TENSOR_TENSOR_MODE"
+sel_mode = "VSEL_CMPMASK_SPR" if (N <= _VEC_ALIGN and dtype != "int32") else "VSEL_TENSOR_TENSOR_MODE"
 ```
 
 **对 UB 预算反推的影响**：
@@ -644,13 +643,13 @@ UB 空间被正交轴 tile（`[N]` 或 `[rows, N]`）和扫描轴 tile（`[block
 ```python
 def find_block_scan(N, L, dtype_str, tile_bytes_per_elem, resident_bytes_per_elem):
     """用剩余 UB 反推扫描轴 block_L。
-    
+
     N 已由正交轴约束确定（核优先 + select 模式对齐），block_L 填满剩余 UB。
     """
     UB_BUDGET = 192 * 1024
-    resident = resident_bytes_per_elem * N          # [1,N] 运行态 buffer
+    resident = resident_bytes_per_elem * N  # [1,N] 运行态 buffer
     avail = UB_BUDGET - resident
-    block_L = avail // (N * tile_bytes_per_elem)    # [block_L, N] 大 tile
+    block_L = avail // (N * tile_bytes_per_elem)  # [block_L, N] 大 tile
     return max(1, min(block_L, L))
 ```
 
@@ -751,7 +750,7 @@ Kernel 签名：input 用原始 `group_size`，output 保持 `padded_group_size`
 ```python
 n_full = total_dim // block_N
 for by in T.serial(n_full):
-    T.copy(data[row:row+row_chunk, by*block_N:(by+1)*block_N], a_ub)
+    T.copy(data[row : row + row_chunk, by * block_N : (by + 1) * block_N], a_ub)
     # ... 与原始代码相同的计算 ...
 ```
 
@@ -760,11 +759,11 @@ for by in T.serial(n_full):
 ```python
 partial = total_dim % block_N
 if partial > 0:
-    a_p = T.alloc_ub([row_chunk, block_N], dtype)   # K3: 完整块大小
-    T.tile.fill(a_p, 0.0)                            # K5: 必须先清零
-    T.copy(data[row:row+row_chunk, n_full*block_N:total_dim], a_p, pad_value=0)
+    a_p = T.alloc_ub([row_chunk, block_N], dtype)  # K3: 完整块大小
+    T.tile.fill(a_p, 0.0)  # K5: 必须先清零
+    T.copy(data[row : row + row_chunk, n_full * block_N : total_dim], a_p, pad_value=0)
     # ... 计算（Pass 1: 累加 / Pass 2: 输出）...
-    T.copy(a_p, output[row:row+row_chunk, n_full*block_N:n_full*block_N+block_N])
+    T.copy(a_p, output[row : row + row_chunk, n_full * block_N : n_full * block_N + block_N])
 ```
 
 #### 检查清单
@@ -787,8 +786,8 @@ if partial > 0:
 
 ```python
 # 问题：transpose → contiguous → .t() → contiguous = 两次物理转置，但轴交换抵消了
-xt = x.transpose(d, -1).contiguous()   # 转置1
-x_LR = xt.t().contiguous()             # 转置2（与转置1抵消！）
+xt = x.transpose(d, -1).contiguous()  # 转置1
+x_LR = xt.t().contiguous()  # 转置2（与转置1抵消！）
 ```
 
 **场景 2：kernel 可以直接接受原始物理布局，host 侧转置完全不需要**
@@ -797,7 +796,7 @@ x_LR = xt.t().contiguous()             # 转置2（与转置1抵消！）
 # 问题：数据原始布局是 [M, R, N]（row-major），kernel 要求 [R, M*N]（scan 维在前）
 # host 做 movedim + contiguous = 1 次转置
 # 但若 kernel 改为在 [M*R, N] 上操作（原始布局 flatten），则零转置
-x_LR = x.movedim(d, 0).contiguous()    # 1 次转置（可避免）
+x_LR = x.movedim(d, 0).contiguous()  # 1 次转置（可避免）
 ```
 
 **场景 3：输出侧的转回也是冗余的**
@@ -814,8 +813,8 @@ out = out_LR.movedim(0, d).contiguous()  # 1 次转置
 
 ```python
 # ❌ reshape(-1) 对非 contiguous 张量等价于 .contiguous()
-x_perm = x.permute(perm)                          # 非 contiguous
-x_3d = x_perm.reshape(-1).reshape(batch, M, N)    # reshape(-1) 触发物理拷贝！
+x_perm = x.permute(perm)  # 非 contiguous
+x_3d = x_perm.reshape(-1).reshape(batch, M, N)  # reshape(-1) 触发物理拷贝！
 ```
 
 **识别方法**：搜索所有 `reshape`，检查目标 shape 与当前 stride 是否兼容，并验证结果
@@ -879,12 +878,12 @@ cummin 向量核要求 scan 维在前 `[L, Rows]`。原始数据是 `[D0, D1, ..
 
 ```python
 # 优化前：两次转置
-xt = x.transpose(d, -1).contiguous()   # fold 到 [Rows, L]
-x_LR = xt.t().contiguous()             # 翻成 [L, Rows]
+xt = x.transpose(d, -1).contiguous()  # fold 到 [Rows, L]
+x_LR = xt.t().contiguous()  # 翻成 [L, Rows]
 
 # 优化后（方法 1）：movedim 替代，一次 contiguous
 xm = x.movedim(d, 0)
-x_LR = xm.reshape(L, Rows).contiguous()   # d==0 时零转置；否则 1 次
+x_LR = xm.reshape(L, Rows).contiguous()  # d==0 时零转置；否则 1 次
 out = out_LR.reshape(moved_shape).movedim(0, d).contiguous()
 
 # 进一步优化（方法 2）：v2 kernel 直接在 [M*R, N] 上操作
@@ -963,14 +962,14 @@ Layer 3（计算模式）：归约 / broadcast / V pipe buffer → 决定代码�
 **Host 侧计算**（每步依赖前一步）：
 
 ```python
-rows = C // G                                    # 要合并的行数
+rows = C // G  # 要合并的行数
 rows_padded = max(((rows + 15) // 16) * 16, 16)  # cast 对齐，至少 16
-block_S = find_block_S(S, rows, dtype_str)       # 动态计算（不可硬编码）
+block_S = find_block_S(S, rows, dtype_str)  # 动态计算（不可硬编码）
 s_num = (S + block_S - 1) // block_S
-S_padded = s_num * block_S                       # 输出末维必须对齐
+S_padded = s_num * block_S  # 输出末维必须对齐
 
-x_4d = x.reshape(N, G, rows, S)                  # 4D 暴露连续行维
-gamma_2d = gamma.reshape(G, rows)                 # 2D，kernel 内用 1D 切片
+x_4d = x.reshape(N, G, rows, S)  # 4D 暴露连续行维
+gamma_2d = gamma.reshape(G, rows)  # 2D，kernel 内用 1D 切片
 ```
 
 > **为什么 block_S 不能硬编码**：多行 Tile 使 UB 占用从 `O(block_S)` 变为 `O(rows × block_S)`。rows=257 时 block_S=256 需要 257×256×4×6 ≈ 1.5MB，远超 UB 的 192KB。
@@ -986,11 +985,13 @@ def find_block_S(S, rows, dtype_str):
     max_bs = (UB_BUDGET // per_block // 16) * 16
     max_bs = min(max_bs, 512)
     for bs in range(max_bs, 0, -16):
-        if S % bs == 0: return bs
+        if S % bs == 0:
+            return bs
     best, min_pad = max_bs, float("inf")
     for bs in range(max_bs, 0, -16):
         pad = (bs - S % bs) % bs
-        if pad < min_pad: min_pad, best = pad, bs
+        if pad < min_pad:
+            min_pad, best = pad, bs
     return max(16, best)
 ```
 
@@ -1034,8 +1035,9 @@ use_fp32 = dtype in ("float16", "bfloat16")
 cal_dtype = "float32" if use_fp32 else dtype
 
 with T.Kernel(N * G, is_npu=True) as (cid, vid):
-    n = cid // G; g = cid % G
-    if vid == 0:                                    # MIX 类型必须加 guard
+    n = cid // G
+    g = cid % G
+    if vid == 0:  # MIX 类型必须加 guard
         sum_a = T.alloc_ub([rows, block_S], cal_dtype)
         data_buf = T.alloc_ub([rows, block_S], dtype)
         data_cal = T.alloc_ub([rows, block_S], cal_dtype)
@@ -1044,18 +1046,18 @@ with T.Kernel(N * G, is_npu=True) as (cid, vid):
             T.tile.fill(sum_a, 0.0)
             for si in T.serial(s_num):
                 s_off = si * block_S
-                T.copy(x[n, g, 0:rows, s_off:s_off+block_S], data_buf)
+                T.copy(x[n, g, 0:rows, s_off : s_off + block_S], data_buf)
                 if use_fp32:
                     T.tile.cast(data_cal, data_buf, CAST_LOW2HIGH, rows * block_S)
                 else:
                     T.copy(data_buf, data_cal)
-                T.tile.add(sum_a, sum_a, data_cal)   # 循环内只累积
+                T.tile.add(sum_a, sum_a, data_cal)  # 循环内只累积
 
             # 循环外两步归约
-            row_buf = T.alloc_ub([rows], cal_dtype)   # 1D！不是 [rows, 1]
+            row_buf = T.alloc_ub([rows], cal_dtype)  # 1D！不是 [rows, 1]
             total = T.alloc_ub([1], cal_dtype)
-            T.reduce_sum(sum_a, row_buf, dim=-1)       # [rows, BS] → [rows]
-            T.reduce_sum(row_buf, total, dim=-1)        # [rows] → [1]
+            T.reduce_sum(sum_a, row_buf, dim=-1)  # [rows, BS] → [rows]
+            T.reduce_sum(row_buf, total, dim=-1)  # [rows] → [1]
 
             # 计算统计量（用 T.cast 做标量类型转换）
             cnt = T.cast(rows * S_orig, cal_dtype)
@@ -1090,8 +1092,8 @@ with T.Kernel(N * G, is_npu=True) as (cid, vid):
 ```python
 mean_col = T.alloc_ub([rows, 1], cal_dtype)
 mean_bc = T.alloc_ub([rows, block_S], cal_dtype)
-T.tile.fill(mean_col, mean_val)                   # fill 支持 buffer 值源
-T.tile.broadcast(mean_bc, mean_col)               # 只沿 dim=-1 扩展
+T.tile.fill(mean_col, mean_val)  # fill 支持 buffer 值源
+T.tile.broadcast(mean_bc, mean_col)  # 只沿 dim=-1 扩展
 ```
 
 **场景 B**（`GM → [rows_padded, 1] → [rows_padded, BS] → 切片 → [rows, BS]`）：
@@ -1162,9 +1164,9 @@ T.tile.add(data_cal_p2, data_cal_p2, beta_bc)
 ```python
 # ❌ 需要优化的模式：kernel 输出拷回 CPU 做后处理
 v, i32 = _run_2d_kernel(x.npu(), ...)
-out_v = v.cpu()                       # D2H：NPU→CPU
-out_i = i32.cpu().to(torch.int64)     # D2H + CPU dtype 转换
-result = torch.where(cond, a, b)      # CPU 上做计算
+out_v = v.cpu()  # D2H：NPU→CPU
+out_i = i32.cpu().to(torch.int64)  # D2H + CPU dtype 转换
+result = torch.where(cond, a, b)  # CPU 上做计算
 result = result.transpose(d, -1).contiguous()  # CPU 上做 transpose
 ```
 
@@ -1192,13 +1194,13 @@ def op_run_npu(x_npu, dim):
     xt = x_npu.transpose(d, -1).contiguous() if d != ndim - 1 else x_npu
     # kernel output stays on NPU
     v, i32 = _run_2d_kernel(x2d, Rows, L, block_R, dtype)
-    out_v = v                           # no .cpu()
-    out_i = i32.to(torch.int64)         # NPU dtype conversion
+    out_v = v  # no .cpu()
+    out_i = i32.to(torch.int64)  # NPU dtype conversion
     # merge on NPU (torch.where auto-runs on NPU)
     out_v[:, s:e] = torch.where(take_prev, rmc, v)
     # transpose back on NPU
     out_v = out_v.reshape(tshape).transpose(d, -1).contiguous()
-    return out_v, out_i                 # both on NPU
+    return out_v, out_i  # both on NPU
 
 
 def op_run(x, dim):
@@ -1284,7 +1286,7 @@ for r in range(sub_block_R):
 # select 模式按 N 动态选择（见 §2.11 select 模式选择）
 sel_mode = "VSEL_CMPMASK_SPR" if (N <= 64 and not is_int) else "VSEL_TENSOR_TENSOR_MODE"
 for j in range(1, L):
-    T.copy(A[j, col_base:col_base + N], curr_ub)
+    T.copy(A[j, col_base : col_base + N], curr_ub)
     T.tile.compare(mask, curr_cal, run_min_cal, "LE")
     T.tile.select(run_idx, mask, idx_curr, run_idx, sel_mode)
     T.tile.min(run_min_cal, run_min_cal, curr_cal)  # 值更新
@@ -1335,8 +1337,8 @@ sel_mode = "VSEL_CMPMASK_SPR" if (N <= 64 and dtype != "int32") else "VSEL_TENSO
 T.tile.min(run_min_cal, run_min_cal, curr_cal)
 
 # 索引更新：两个 select 串联（sel_mode 按 N 选择，见 §2.11）
-T.tile.compare(mask_le, curr_cal, run_min_cal, "LE")       # 正常比较
-T.tile.compare(mask_nan, curr_cal, curr_cal, "EQ")          # NaN 检测
+T.tile.compare(mask_le, curr_cal, run_min_cal, "LE")  # 正常比较
+T.tile.compare(mask_nan, curr_cal, curr_cal, "EQ")  # NaN 检测
 T.tile.select(run_idx, mask_le, idx_curr, run_idx, sel_mode)
 # Step 2: self_eq=True(normal/inf)->keep step1, False(NaN)->j
 T.tile.select(run_idx, mask_nan, run_idx, idx_curr, sel_mode)
@@ -1351,13 +1353,13 @@ NaN 处理比无 NaN 路径多 2 条向量指令（NaN 自比较 + 修正 select
 has_nan = bool(torch.isnan(x_LR).any())  # int32 恒 False
 
 # kernel 内编译期分路（has_nan 是 JIT 常量，零运行时开销）
-if has_nan:      # 慢路径 6 op：LE compare + EQ self compare + 2 select + min + fill
+if has_nan:  # 慢路径 6 op：LE compare + EQ self compare + 2 select + min + fill
     T.tile.compare(mask_le, curr, run_min, "LE")
     T.tile.compare(mask_nan, curr, curr, "EQ")
     T.tile.select(run_idx, mask_le, idx_curr, run_idx, sel_mode)
     T.tile.select(run_idx, mask_nan, run_idx, idx_curr, sel_mode)
     T.tile.min(run_min, run_min, curr)
-else:            # 快路径 4 op：LE compare + select + min + fill
+else:  # 快路径 4 op：LE compare + select + min + fill
     T.tile.compare(mask_le, curr, run_min, "LE")
     T.tile.select(run_idx, mask_le, idx_curr, run_idx, sel_mode)
     T.tile.min(run_min, run_min, curr)
@@ -1414,14 +1416,14 @@ else:
 
 **适用场景**：算子声明支持的 dtype 命中目标 tile 指令的非硬件路径，并且基线或生成
 代码证明该路径是实际瓶颈。以 `T.tile.transpose` 为例，检查
-`src/tl_templates/ascend/common.h` 中对应 `Transpose` 模板分支，不依赖容易漂移的固定行号。
+`src/ascend/a2a3/tl_templates/ascend/common.h` 中对应 `Transpose` 模板分支，不依赖容易漂移的固定行号。
 
 > 也适用于其他 `T.tile.xxx` 指令 + 不支持 dtype 的组合，判断准则一致：先到 `common.h` 确认该指令的模板分支条件，再按本节候选路线选择处理方案。
 
 **识别方法（两步，缺一不可）**：
 
 **第一步：分支条件分析法**。按 `Transpose` 符号定位
-`src/tl_templates/ascend/common.h` 中目标 tile 指令的 C++ 模板分支，列出当前算子所
+`src/ascend/a2a3/tl_templates/ascend/common.h` 中目标 tile 指令的 C++ 模板分支，列出当前算子所
 支持 dtype 的路径归属，不依赖固定源码行号。
 
 | 分支 | 条件 | 命中 dtype | 路径 |
@@ -1524,17 +1526,13 @@ T.copy(x[b, m_start, n_start], a_ub)
 
 ```python
 T.copy(
-    x[b,
-      m_start:m_start + block_M,
-      n_start:n_start + block_N],
+    x[b, m_start : m_start + block_M, n_start : n_start + block_N],
     a_ub,
 )
 T.tile.transpose(b_ub, a_ub)
 T.copy(
     b_ub,
-    y[b,
-      n_start:n_start + block_N,
-      m_start:m_start + block_M],
+    y[b, n_start : n_start + block_N, m_start : m_start + block_M],
 )
 ```
 
@@ -1569,17 +1567,13 @@ with T.Kernel(core_num, is_npu=True) as (cid, vid):
             m_blk = (task // n_blocks) % m_blocks
             b_idx = task // (n_blocks * m_blocks)
             T.copy(
-                x[b_idx,
-                  m_blk * block_M:(m_blk + 1) * block_M,
-                  n_blk * block_N:(n_blk + 1) * block_N],
+                x[b_idx, m_blk * block_M : (m_blk + 1) * block_M, n_blk * block_N : (n_blk + 1) * block_N],
                 a_ub,
             )
             T.tile.transpose(b_ub, a_ub)
             T.copy(
                 b_ub,
-                y[b_idx,
-                  n_blk * block_N:(n_blk + 1) * block_N,
-                  m_blk * block_M:(m_blk + 1) * block_M],
+                y[b_idx, n_blk * block_N : (n_blk + 1) * block_N, m_blk * block_M : (m_blk + 1) * block_M],
             )
 ```
 
@@ -1661,7 +1655,7 @@ for i in range(n):
         T.wait_cross_flag(SEM_ID)
 ```
 
-> **核间 Pipeline**：使用 `T.Pipelined` 实现核间流水掩盖，详见 [T.Pipelined 使用教程](../../../../docs/tutorials/t_pipelined.md)。
+> **核间 Pipeline**：使用 `T.Pipelined` 实现核间流水掩盖，详见 [T.Pipelined 使用教程](../../../../docs/ascend_a2a3/tutorials/t_pipelined.md)。
 
 ---
 

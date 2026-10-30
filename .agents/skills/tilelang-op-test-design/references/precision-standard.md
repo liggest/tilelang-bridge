@@ -93,16 +93,16 @@ def get_precision(dtype):
     浮点：混合容差；整型：精确匹配（0 误差）。"""
     fp_table = {
         # dtype       : (atol,   rtol,   max_abs_error_limit, required_matched_ratio)
-        "float16":     (2**-14, 2**-9,  1e-1, 0.99),   # atol 6.10e-5, rtol 1.95e-3
-        "bfloat16":    (2**-10, 2**-6,  1e0,  0.99),   # atol 9.77e-4, rtol 1.56e-2
-        "float32":     (2**-16, 2**-10, 1e-2, 0.99),   # atol 1.53e-5, rtol 9.77e-4
-        "hifloat32":   (2**-16, 2**-10, 1e-2, 0.99),
-        "float8_e4m3": (2**-4,  2**-2,  1e0,  0.99),   # atol 0.0625, rtol 0.25
-        "float8_e5m2": (2**-3,  2**-1,  1e-1, 0.99),   # atol 0.125,  rtol 0.5
+        "float16": (2**-14, 2**-9, 1e-1, 0.99),  # atol 6.10e-5, rtol 1.95e-3
+        "bfloat16": (2**-10, 2**-6, 1e0, 0.99),  # atol 9.77e-4, rtol 1.56e-2
+        "float32": (2**-16, 2**-10, 1e-2, 0.99),  # atol 1.53e-5, rtol 9.77e-4
+        "hifloat32": (2**-16, 2**-10, 1e-2, 0.99),
+        "float8_e4m3": (2**-4, 2**-2, 1e0, 0.99),  # atol 0.0625, rtol 0.25
+        "float8_e5m2": (2**-3, 2**-1, 1e-1, 0.99),  # atol 0.125,  rtol 0.5
     }
     int_types = {"int8", "int16", "int32", "int64", "uint8"}
     if dtype in int_types:
-        return (0.0, 0.0, 0.0, 1.0)          # 整型：精确匹配，一个元素不符即 FAIL
+        return (0.0, 0.0, 0.0, 1.0)  # 整型：精确匹配，一个元素不符即 FAIL
     return fp_table.get(dtype, (2**-14, 2**-9, 1e-1, 0.99))
 
 
@@ -113,21 +113,22 @@ def check_precision(actual, golden, dtype):
     atol, rtol, max_abs_limit, required_ratio = get_precision(dtype)
     a = actual.detach().cpu()
     g = golden.detach().cpu()
-    if atol == 0.0 and rtol == 0.0:                      # 整型精确匹配
+    if atol == 0.0 and rtol == 0.0:  # 整型精确匹配
         mism = (a != g).sum().item()
         total = max(a.numel(), 1)
         return mism == 0, 1.0 - mism / total, (0.0 if mism == 0 else float("inf"))
     a = a.float()
     g = g.float()
-    special = ~torch.isfinite(g)                         # inf/nan 位置结构比对
+    special = ~torch.isfinite(g)  # inf/nan 位置结构比对
     if special.any():
-        if not torch.equal(torch.isnan(a[special]), torch.isnan(g[special])) or \
-           not torch.equal(torch.isinf(a[special]), torch.isinf(g[special])):
+        if not torch.equal(torch.isnan(a[special]), torch.isnan(g[special])) or not torch.equal(
+            torch.isinf(a[special]), torch.isinf(g[special])
+        ):
             return False, 0.0, float("inf")
-    m = torch.isfinite(g)                                # golden 有限值位置全比：actual 若为 inf/nan 则计为不达标
+    m = torch.isfinite(g)  # golden 有限值位置全比：actual 若为 inf/nan 则计为不达标
     if m.sum().item() == 0:
         return True, 1.0, 0.0
-    abs_err = (a[m] - g[m]).abs()                        # actual 为 inf/nan 处 abs_err=inf/nan → 逐元素判 False 且拉高 max_abs
+    abs_err = (a[m] - g[m]).abs()  # actual 为 inf/nan 处 abs_err=inf/nan → 逐元素判 False 且拉高 max_abs
     matched_ratio = (abs_err <= (atol + rtol * g[m].abs())).float().mean().item()
     max_abs_error = abs_err.max().item()
     passed = (matched_ratio >= required_ratio) and (max_abs_error <= max_abs_limit)

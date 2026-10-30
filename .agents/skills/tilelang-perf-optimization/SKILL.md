@@ -3,6 +3,8 @@ name: tilelang-perf-optimization
 description: TileLang 算子性能调优与潜在性能劣化模式检查。提供性能数据采集、瓶颈诊断、优化实施、效果验证能力；也用于生成或评审算子时对照常见性能劣化模式示例检查当前 kernel 代码。触发：算子精度通过后需要优化性能、性能不及预期时。
 ---
 
+> 适用范围：TA A2/A3 资产；主线 backend/build/IR/A5 技能保持独立。先读 docs/ascend_a2a3/migration.md，已有用户授权、模式与原配置优先；不重复请求同一批准，不因搬入本 skill 自动授权安装/外发/push/定时任务。
+
 # TileLang 性能优化
 
 ## 工作流程
@@ -29,17 +31,17 @@ Step 1: 基线采集（性能 + 精度）
 - **API 用法**：[tilelang-api-best-practices](../tilelang-custom-skill/tilelang-api-best-practices/SKILL.md)
 - **编程模式**：[tilelang-programming-model-guide](../tilelang-custom-skill/tilelang-programming-model-guide/SKILL.md)
 - **cube最佳实践**：[cube_optimization_path.md](references/best-practices/cube_optimization_path.md)
-- **vector最佳实践**：[vector-practices/](references/vector-practices/)
+- **vector最佳实践**：[vector-practices/](references/vector-practices)
 ---
 
 ## 执行步骤
 
 ### Step 1: 基线采集
 
-在 `examples/{op_name}/` 下查找含 `@tilelang.jit` 的脚本，运行：
+在 `examples/ascend_a2a3/{op_name}/` 下查找含 `@tilelang.jit` 的脚本，运行：
 
 ```bash
-msprof op --kernel-name="main_kernel" --output=./msprof_output python ./examples/{op_name}/<script_name>.py
+msprof op --kernel-name="main_kernel" --output=./msprof_output python ./examples/ascend_a2a3/{op_name}/<script_name>.py
 ```
 
 精度未通过 → 禁止后续步骤。
@@ -141,7 +143,7 @@ Edit 调用方、dispatch 或 planner 前，再写 `[KERNEL-REUSE-AUDIT]` 复核
 
 每个优化点后执行：精度验证 → `msprof op` → 记录 → 对比基线。精度失败时保持优化调试，不撤销。
 
-调试手段：`T.printf`、`T.dump_tensor`、`get_kernel_source()`，详见 [Programming Guide](../../../docs/TileLang-Ascend%20Programming%20Guide.md)。
+调试手段：`T.printf`、`T.dump_tensor`、`get_kernel_source()`，详见 [Programming Guide](../../../docs/ascend_a2a3/TileLang-Ascend%20Programming%20Guide.md)。
 
 迭代终止：达到目标或连续 3 次无提升则中断上报。
 
@@ -149,7 +151,7 @@ Edit 调用方、dispatch 或 planner 前，再写 `[KERNEL-REUSE-AUDIT]` 复核
 
 ## 优化记录
 
-保存在 `examples/{op_name}/perf_tuning/`：
+保存在 `examples/ascend_a2a3/{op_name}/perf_tuning/`：
 - `baseline.json` - 基线性能
 - `optimization_log.md` - 优化记录
 - `final_report.md` - 最终报告

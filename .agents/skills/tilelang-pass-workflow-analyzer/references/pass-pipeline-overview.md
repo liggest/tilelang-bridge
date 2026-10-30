@@ -1,6 +1,6 @@
 # TileLang-Ascend pass pipeline
 
-This reference owns the current execution order in `tilelang/engine/phase.py`. Do not copy fixed
+This reference owns the current execution order in `tilelang/ascend/a2a3/pipeline.py`. Do not copy fixed
 pass counts or source line numbers into other skills; target and config gates make them unstable.
 
 ## Two phases
@@ -144,8 +144,8 @@ default and any target-level defaults.
 
 | Concern | File |
 | --- | --- |
-| exact order and target gates | `tilelang/engine/phase.py` |
-| Python wrappers | `tilelang/transform/__init__.py` |
-| public config keys | `tilelang/transform/pass_config.py` |
-| C/V classifier and verifier | `src/transform/ascend_combinecv.cc` |
+| exact order and target gates | `tilelang/ascend/a2a3/pipeline.py` |
+| Python wrappers | `tilelang/ascend/a2a3/transform/__init__.py` |
+| public config keys | `tilelang/ascend/a2a3/pass_config.py` |
+| C/V classifier and verifier | `src/ascend/a2a3/transform/ascend_combinecv.cc` |
 | managed mask contract | `docs/ascend/compiler_managed_vector_mask.md` |

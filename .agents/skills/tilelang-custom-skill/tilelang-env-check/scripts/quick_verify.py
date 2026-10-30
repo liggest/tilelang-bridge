@@ -5,8 +5,9 @@ Used to verify if the environment is correctly configured
 """
 
 import torch
+import torch_npu  # noqa: F401
 import tilelang
-import tilelang.language as T
+import tilelang.ascend.a2a3.language as T
 
 
 @tilelang.jit(out_idx=[-1])
@@ -34,7 +35,7 @@ def simple_add(M=16, N=16, dtype="float"):
 
 
 def main():
-    tilelang.cache.clear_cache()
+    # Keep the caller's cache; this smoke test is not a cold-performance benchmark.
 
     M, N = 16, 16
     func = simple_add(M, N)

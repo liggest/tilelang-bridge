@@ -17,15 +17,23 @@ Precision standard (fp16 mixed tolerance, per precision-standard.md):
 
 import argparse
 import math
-import os
 import sys
 
 import torch
 
-# Ensure we can import the sibling kernel module.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Load only this private sibling; do not alter caller import search paths.
+try:
+    from . import example_mla_decode_paged as _mla_module
+except ImportError:
+    import importlib.util as _importlib_util
+    from pathlib import Path as _Path
 
-from example_mla_decode_paged import mla_decode_tilelang  # noqa: E402
+    _spec = _importlib_util.spec_from_file_location(
+        "_a2a3_experiment_mla_decode_paged", _Path(__file__).with_name("example_mla_decode_paged.py")
+    )
+    _mla_module = _importlib_util.module_from_spec(_spec)
+    _spec.loader.exec_module(_mla_module)
+mla_decode_tilelang = _mla_module.mla_decode_tilelang
 
 # ============================================================================
 # Golden reference (CPU, fp32 computation)
@@ -719,7 +727,7 @@ def test_mla_decode_paged_boundary():
 # ============================================================================
 
 
-def main():
+def _original_main():
     parser = argparse.ArgumentParser(description="MLA Decode Paged Attention Test")
     parser.add_argument(
         "--level",
@@ -785,6 +793,12 @@ def main():
         print("Test Passed!")
 
     return exit_code
+
+
+def main():
+    import torch_npu  # noqa: F401
+
+    return _original_main()
 
 
 if __name__ == "__main__":

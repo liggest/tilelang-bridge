@@ -32,15 +32,17 @@ Here's how a debug version should look:
 ```python
 import os
 import tilelang
-import tilelang.language as T
+import tilelang.ascend.a2a3.language as T
 import torch
 
 tilelang.cache.clear_cache()
+
 
 @tilelang.jit(out_idx=[1])
 def sigmoid(M, N, block_M, block_N, dtype="float"):
     # ... kernel implementation ...
     pass
+
 
 torch.manual_seed(0)
 

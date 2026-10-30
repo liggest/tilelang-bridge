@@ -1,7 +1,9 @@
 ---
 name: tilelang-a5-sim-convert
-description: "将 tilelang example 脚本转换为可在 A5 camodel 仿真器上直接运行的版本。输入脚本路径，输出一个新的 *_sim.py 文件，不覆盖原始文件。触发：仿真运行、camodel、A5 仿真、sim 模式、转换脚本为仿真、不需要 NPU 跑 kernel、simulate A5。"
+description: "TA来源A5历史参考，非A2/A3或现代A5执行承诺。将 tilelang example 脚本转换为可在 A5 camodel 仿真器上直接运行的版本。输入脚本路径，输出一个新的 *_sim.py 文件，不覆盖原始文件。触发：仿真运行、camodel、A5 仿真、sim 模式、转换脚本为仿真、不需要 NPU 跑 kernel、simulate A5。"
 ---
+
+> TA 原 A5 转换资料，保留来源与完整模板，尚未对现代 A5 接口重新验收；不是 A2/A3 sim 支持。当前 A5 开发先读主线 tilelang-ascend。不要自动执行下文旧转换脚本。
 
 # TileLang A5 Camodel 仿真脚本转换
 
@@ -147,11 +149,11 @@ kl.call.argtypes = [ctypes.c_void_p] * 4
 ```python
 # H2D（CPU → 设备），第 230-231 行
 rt.rtMemcpy(d_A, size, h_A.ctypes.data, size, 1)  # 最后一个参数 1 = host→device
-                                                    # 每个输入 buffer 都要拷一次
+# 每个输入 buffer 都要拷一次
 
 # D2H（设备 → CPU），第 239 行
 rt.rtMemcpy(h_C.ctypes.data, size, d_C, size, 2)  # 最后一个参数 2 = device→host
-                                                    # 只有输出 buffer 需要拷
+# 只有输出 buffer 需要拷
 ```
 
 ### 不需要改的部分

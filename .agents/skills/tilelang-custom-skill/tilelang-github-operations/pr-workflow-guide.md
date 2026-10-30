@@ -8,7 +8,7 @@
 
 ### 1. 确认目标仓库和分支
 
-如果用户没有明确指定目标仓库和分支，**必须先询问用户**：
+先从当前任务、已知仓库与分支确认目标；仅信息确实不足时才询问，已明确授权不重复确认：
 
 ```
 请问您希望提交到哪个仓库和分支？
@@ -208,13 +208,13 @@ Add softmax vector operator implementation for Ascend NPU.
 
 ## Changes
 
-- Add `examples/softmax/softmax.py` with kernel implementation
+- Add `examples/ascend_a2a3/softmax/softmax.py` with kernel implementation
 - Add test cases for various input shapes
 - Update documentation
 
 ## Testing
 
-Run `python examples/softmax/softmax.py` to verify correctness.
+Run `python examples/ascend_a2a3/softmax/softmax.py` to verify correctness.
 EOF
 )"
 ```
@@ -282,7 +282,7 @@ gh pr merge <number>
 
 ## 注意事项
 
-1. **检查 gh 工具可用性** - 创建 PR 前确认 `gh`（GitHub CLI）已安装并完成认证。若工具不存在，请参考 [gh-cli-guide.md](./gh-cli-guide.md) 进行安装和配置
+1. **检查 gh 工具可用性** - 创建 PR 前确认 `gh`（GitHub CLI）已安装并完成认证。若工具不存在，请参考 [gh-cli-guide.md](gh-cli-guide.md) 进行安装和配置
 2. **始终确认目标仓库和分支** - 默认为 `tile-ai/tilelang-ascend` 的 `ascendc_pto` 分支；若用户仅指定仓库，默认分支通常为 `main`
 3. **提交前展示文件列表** - 让用户确认，避免提交意外文件
 4. **不要提交敏感文件** - 如 `.env`、`credentials.json`、密钥等
@@ -306,7 +306,7 @@ git log --oneline -5
 git status --short
 
 # 3. 暂存确认的文件
-git add examples/softmax/
+git add examples/ascend_a2a3/softmax/
 
 # 4. 提交（注意 🤖 标识）
 git commit -m "[Feat] Add softmax vector operator 🤖"
@@ -332,7 +332,7 @@ Add softmax kernel implementation for Ascend NPU.
 
 ## Testing
 
-Run `python examples/softmax/softmax.py`
+Run `python examples/ascend_a2a3/softmax/softmax.py`
 EOF
 )"
 

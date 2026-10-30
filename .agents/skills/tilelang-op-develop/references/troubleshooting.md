@@ -27,7 +27,7 @@ TVMError: Memory allocation failed for: buffer_name required: XXXX, new memory a
    ```python
    # 原始
    block_M, block_N = 128, 256
-   
+
    # 修改为更小的值
    block_M, block_N = 64, 128
    ```
@@ -56,7 +56,7 @@ error: Source and Dest dimension must match.
 
 ```python
 # 正确
-max_ub = T.alloc_ub([block_M // VEC_NUM, 1], dtype)      # [M, 1]
+max_ub = T.alloc_ub([block_M // VEC_NUM, 1], dtype)  # [M, 1]
 max_2d_ub = T.alloc_ub([block_M // VEC_NUM, block_N], dtype)  # [M, N]
 T.tile.broadcast(max_2d_ub, max_ub)
 
@@ -284,7 +284,7 @@ GEMM 类算子（含 im2col+GEMM 卷积）必须覆盖以下 4 类场景：
 
 生成新代码或修改现有实现后，**必须先用原有默认参数跑通**，确认 baseline 无回归：
 ```bash
-python examples/{op}/test_{op}.py  # 默认参数测试
+python examples/ascend_a2a3/{op}/test_{op}.py  # 默认参数测试
 ```
 确认通过后，再用 `--b/--c/...` 扩维参数测试新场景。
 
@@ -321,9 +321,9 @@ print(func.get_kernel_source())
 ```python
 # 从最小规模开始
 test_configs = [
-    (4, 8, 4, 8),       # 最小
-    (64, 64, 32, 32),   # 小
-    (256, 256, 64, 64), # 中
+    (4, 8, 4, 8),  # 最小
+    (64, 64, 32, 32),  # 小
+    (256, 256, 64, 64),  # 中
 ]
 ```
 
@@ -334,10 +334,10 @@ test_configs = [
 使用 `T.dyn` 或 `T.dynamic`：
 ```python
 # 方法1: 通过buffer.shape获取
-N = T.dyn['N']  # 从buffer shape推断
+N = T.dyn["N"]  # 从buffer shape推断
 
 # 方法2: 直接声明
-N = T.dynamic('N', 'int32')
+N = T.dynamic("N", "int32")
 ```
 
 ### 2. 如何实现带参数的算子?
@@ -373,10 +373,10 @@ def main(A: T.Tensor((B, M, N), dtype), ...):
    ```python
    # 使用同一个buffer存储中间结果
    temp_ub = T.alloc_ub([M, N], dtype)
-   
+
    # 第一阶段
    T.tile.exp(temp_ub, a_ub)
-   
+
    # 第二阶段（复用temp_ub）
    T.tile.add(temp_ub, temp_ub, 1.0)
    ```

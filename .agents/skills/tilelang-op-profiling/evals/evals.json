@@ -3,7 +3,7 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "请对 examples/gemm/example_gemm_intrinsic.py 的一个 fp16 case 做上板 profiling，并使用现有入口完成性能分析。",
+      "prompt": "请对 examples/ascend_a2a3/gemm/example_gemm_intrinsic.py 的一个 fp16 case 做上板 profiling，并使用现有入口完成性能分析。",
       "expected_output": "先做正确性和预运行，再使用不带 --soc-version 的 msprof op 采集；归档 metadata、CSV 和 summary，并输出瓶颈证据。",
       "files": []
     },

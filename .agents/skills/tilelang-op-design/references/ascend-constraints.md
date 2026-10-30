@@ -18,11 +18,11 @@
 
 | 约束 | 说明 | 影响 | 替代方案 |
 |------|------|------|----------|
-| **不支持三维 Kernel** | `T.Kernel` 只接受一维 block 数 | 三维并行设计无法实现 | 使用 `block_metadata` 预计算机制（参考 `examples/grouped_gemm/`） |
+| **不支持三维 Kernel** | `T.Kernel` 只接受一维 block 数 | 三维并行设计无法实现 | 使用 `block_metadata` 预计算机制（参考 `examples/ascend_a2a3/grouped_gemm/`） |
 | **threads 参数限制** | 只支持 1 或 2，不支持大值 | `threads=128` 等设计报错 | 默认不指定 threads 或设为 2 |
 | **动态循环边界不支持** | 循环次数不能依赖 tensor 值（如 `batch_sizes[bz]`） | `T.Pipelined(batch_sizes[bz])` 报错 | 预计算最大循环次数，用 `T.serial(max_iters)` + 条件判断 |
 | **流水线不支持动态边界** | `T.Pipelined` 的循环次数必须静态 | 动态批次无法流水线 | 改用 `T.serial` 或预计算固定迭代次数 |
-| **部分 GPU API 不可用** | CUDA 专用 API 在 Ascend 不存在 | 直接移植 GPU 代码失败 | 查阅本项目 `examples/` 确认 Ascend API |
+| **部分 GPU API 不可用** | CUDA 专用 API 在 Ascend 不存在 | 直接移植 GPU 代码失败 | 查阅本项目 `examples/ascend_a2a3/` 确认 Ascend API |
 | **L0C 容量上限** | A2/A3 设备 L0C = 128KB | `block_M × block_N × sizeof(accum) > 128KB` 导致 segfault | 设计 block 时满足 `block_M × block_N ≤ 16384`（float32 accum） |
 | **T.copy 不支持列方向 strided 切片** | AscendC `DataCopyPad` 硬件指令只支持行间 gap、不支持行内（列方向）strided access。当切片的列维（最后一个 extent≠1 的维度）不是 buffer 最内维且之后有 shape>1 的维度时，产生**静默数据错位** | 4D+ 切片如 `x[b, m:m+M, n:n+N, k:k+1]`（K>1）无法正确搬运 | 用 3D 切片 + host 侧 `permute`+`reshape` 降维到 3D `(batch, M, N)` 使列维成为最内维（仅 contiguous 张量可用）；详见 `tilelang-api-best-practices/references/api-kernel-memory.md` §T.copy 多维切片的硬件限制 |
 
@@ -53,15 +53,15 @@
 1. 三维 Kernel（本项目只支持一维 Kernel）
    - 参考实现：T.Kernel(m_num, n_num, batch_count)
    - 本项目方案：T.Kernel(total_blocks) + block_metadata 预计算表
-   - 参考：examples/grouped_gemm/example_grouped_gemm_fwd.py
+   - 参考：examples/ascend_a2a3/grouped_gemm/example_grouped_gemm_fwd.py
 
 2. 动态循环边界（本项目不支持 tensor 值作为循环边界）
    - 参考实现：T.Pipelined(batch_sizes[bz])
    - 本项目方案：T.serial(max_k_iters) + if k < k_iters 条件判断
-   - 参考：examples/grouped_gemm/example_grouped_gemm_fwd.py
+   - 参考：examples/ascend_a2a3/grouped_gemm/example_grouped_gemm_fwd.py
 
 建议：
-- 先查阅本项目 examples/ 中的同类实现
+- 先查阅本项目 examples/ascend_a2a3/ 中的同类实现
 - 确认 Ascend API 用法后再生成设计文档
 
 是否继续生成设计文档？

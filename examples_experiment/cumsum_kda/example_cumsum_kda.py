@@ -1,10 +1,12 @@
+"""Complete original experimental source; runtime requires explicit main()."""
+
+import os
+from tilelang.ascend.a2a3.kernel_cache import A2A3CythonKernelCache
 import functools
 
 import tilelang
-import tilelang.language as tl
+import tilelang.ascend.a2a3.language as tl
 import torch
-
-tilelang.cache.clear_cache()
 
 pass_configs = {
     tilelang.PassConfigKey.TL_ASCEND_AUTO_CV_COMBINE: True,
@@ -749,8 +751,18 @@ def ref_varlen_cumsum(ref_fn, s, cu_seqlens, head_first=False, **kwargs):
     return result
 
 
-if __name__ == "__main__":
-    tilelang.cache.clear_cache()
+def main():
+    if not os.environ.get("TILELANG_CACHE_DIR"):
+        raise RuntimeError("Set a dedicated TILELANG_CACHE_DIR before running this cache-clearing example.")
+    from pathlib import Path
+    from tilelang import env
+
+    if Path(env.TILELANG_CACHE_DIR).resolve() != Path(os.environ["TILELANG_CACHE_DIR"]).resolve():
+        raise RuntimeError("The resolved cache differs from the explicit TILELANG_CACHE_DIR; remove the caller cache override first.")
+    import torch_npu  # noqa: F401
+
+    A2A3CythonKernelCache().clear_cache()
+    A2A3CythonKernelCache().clear_cache()
     torch.manual_seed(0)
 
     print("=== Testing chunk_local_cumsum_scalar ===")
@@ -941,3 +953,7 @@ if __name__ == "__main__":
     print("varlen global vector dispatcher: Passed!")
 
     print("\nKernel Output Match!")
+
+
+if __name__ == "__main__":
+    main()

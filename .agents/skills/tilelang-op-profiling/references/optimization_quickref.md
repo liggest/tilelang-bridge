@@ -233,12 +233,12 @@ for tile in T.Pipelined(num_tiles, num_stages=num_stages):
 
 | 优化模式 | 参考文件 |
 |---|---|
-| Vector Tile、UB 搬运、归约 | `examples/pos_embedding/rms_norm.py` |
-| Expert GEMM 的 L1/L0C 数据流 | `examples/gemm/example_gemm.py` |
-| GEMM intrinsic 与流水 | `examples/gemm/example_gemm_intrinsic.py` |
-| 独立性能入口与多 case | `examples/gqa_fwd_varlen/perf_gqa_fwd_varlen.py` |
-| `msprof op` 单 kernel 入口 | `examples/pos_embedding/RotaryPositionEmbedding/rope_half_interleaved.py` |
-| `do_bench` 与 `msprof op` 双入口 | `examples/fusedmoe/test_fusedmoe.py` |
-| 普通 `msprof` 结果解析 | `examples/flash_attention/fa_opt/run.py` |
+| Vector Tile、UB 搬运、归约 | `examples/ascend_a2a3/pos_embedding/rms_norm.py` |
+| Expert GEMM 的 L1/L0C 数据流 | `examples/ascend_a2a3/gemm/example_gemm.py` |
+| GEMM intrinsic 与流水 | `examples/ascend_a2a3/gemm/example_gemm_intrinsic.py` |
+| 独立性能入口与多 case | `examples/ascend_a2a3/gqa_fwd_varlen/perf_gqa_fwd_varlen.py` |
+| `msprof op` 单 kernel 入口 | `examples/ascend_a2a3/pos_embedding/RotaryPositionEmbedding/rope_half_interleaved.py` |
+| `do_bench` 与 `msprof op` 双入口 | `examples/ascend_a2a3/fusedmoe/test_fusedmoe.py` |
+| 普通 `msprof` 结果解析 | `examples/ascend_a2a3/flash_attention/fa_opt/run.py` |
 
 抽取优化模式时必须保留目标算子的接口、数据布局、边界处理和精度语义，不能整文件替换目标 kernel。

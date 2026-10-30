@@ -21,16 +21,16 @@ block_M_2 = block_M // VEC_NUM
 
 with T.Kernel(grid_size, is_npu=True) as (cid, vid):
     row_start = cid * block_M + vid * block_M_2
-    
+
     # Buffer 分配：只需分配 V 核负责的行数
     data_ub = T.alloc_shared((block_M_2, block_N), dtype)
-    
+
     # 读入数据
     T.copy(A[row_start, by * block_N], data_ub)
-    
+
     # 计算
     ...
-    
+
     # 写出数据（索引必须与读一致）
     T.copy(data_ub, B[row_start, by * block_N])
 ```

@@ -8,7 +8,7 @@ disable: true
 
 ## 适用场景
 
-适合在 `examples/{op}/` 下新增**自定义 TileLang-Ascend 算子**的完整开发流程。**不适用于** Pass 开发、编译器内部修改、bug 修复等场景。
+适合在 `examples/ascend_a2a3/{op}/` 下新增**自定义 TileLang-Ascend 算子**的完整开发流程。**不适用于** Pass 开发、编译器内部修改、bug 修复等场景。
 
 ## 代理拓扑
 
@@ -94,7 +94,7 @@ Orchestrator 在进入 Stage 1 之前自动调用 `tilelang-env-check`，**一�
 
 | 触发情形 | 例子 |
 |---------|------|
-| API 不存在 | design 用了 `tilelang/language/` 中无导出的 API |
+| API 不存在 | design 用了 `tilelang/ascend/a2a3/language/` 中无导出的 API |
 | L0C 容量溢出 | `block_M × block_N × sizeof(accum) > 128KB` |
 | 内存层级不可实现 | design 要求 GM → L0 直接搬运跳过 L1/UB |
 | 同步策略冲突 | Developer 模式 design 中要求手动同步 |
@@ -133,14 +133,14 @@ softmax(x_i) = exp(x_i) / sum(exp(x_j))，输入是 [B, N] 的 float16
 ```
 
 Orchestrator 唯一会反向询问的关键信息：
-1. **编程模式**（Developer / Expert / 混合）—— 根 [AGENTS.md](../../AGENTS.md) 强制要求
+1. **编程模式**（Developer / Expert / 混合）—— 新任务不明时澄清；既定factory或已选模式直接沿用
 2. **精度通过后**：是否需要性能调优（可选）
 
 其他字段（精度容忍度、动态轴范围等）有合理默认值，不主动提就用默认。
 
 ### 中断后续跑
 
-再次对 `@tilelang-op-orchestrator` 提及算子名，它会从 `examples/{op}/.orchestrator_state.json` 自动续跑：
+再次对 `@tilelang-op-orchestrator` 提及算子名，它会从 `examples/ascend_a2a3/{op}/.orchestrator_state.json` 自动续跑：
 
 ```
 @tilelang-op-orchestrator 继续 softmax 的开发
@@ -163,10 +163,10 @@ Orchestrator 唯一会反向询问的关键信息：
 
 ## 产物目录约定
 
-每个算子在 `examples/{op}/` 下有完整产物：
+每个算子在 `examples/ascend_a2a3/{op}/` 下有完整产物：
 
 ```
-examples/{op}/
+examples/ascend_a2a3/{op}/
 ├── DESIGN.md                              # Stage 1
 ├── proto.yaml                             # Stage 1（算子接口规格 dtype/attr，供覆盖门禁派生应覆盖维度）
 ├── {op}.py                                # Stage 2 / 3 纯 kernel（@tilelang.jit，可 import，无 golden/测试/__main__）
@@ -196,7 +196,7 @@ examples/{op}/
 
 ## 状态文件
 
-`examples/{op}/.orchestrator_state.json` 是 Orchestrator 的唯一权威状态：
+`examples/ascend_a2a3/{op}/.orchestrator_state.json` 是 Orchestrator 的唯一权威状态：
 
 ```json
 {
@@ -231,12 +231,12 @@ examples/{op}/
 | 反复出现 `[DESIGN_ERROR]` 回退 | analyst 收不到历史回退信息 | 检查状态文件 `design_revision_count` 是否累加；查看 `history_version/design_rev*.md` 是否齐全 |
 | Stage 2 反复精度失败 | 实现层无解，应为 design 错误 | Developer 应主动返回 `[DESIGN_ERROR]`；若它没主动报，可手动跑 `/tilelang-op-design` 修正 design |
 | `BLOCKED_ENVIRONMENT` | torch/torch_npu/CANN 版本不达标 | 按报告中的修复命令处理；自动可修复的（子模块/编译）已尝试 |
-| 中断后想从头开始 | 不想续跑 | 删除 `examples/{op}/.orchestrator_state.json`，重新触发 orchestrator |
+| 中断后想从头开始 | 不想续跑 | 删除 `examples/ascend_a2a3/{op}/.orchestrator_state.json`，重新触发 orchestrator |
 | 状态文件结构异常 | 字段缺失或旧格式 | Orchestrator 会自动迁移；严重情况下删除状态文件重跑 |
 
 ## 与项目根 AGENTS.md 的关系
 
-代理体系遵循根 [AGENTS.md](../../AGENTS.md) 的 6 项核心原则：
+代理体系遵循根 [AGENTS.md](../../docs/ascend_a2a3/AGENTS.candidate.md) 的 6 项核心原则：
 
 1. 不要凭记忆猜 API
 2. 从示例入手
@@ -249,9 +249,9 @@ Orchestrator 在调度 Subagent 时会在 prompt 中明确提醒这些原则，S
 
 ## 相关文档
 
-- [AGENTS.md](../../AGENTS.md) — 项目级开发规范与代理体系入口
+- [AGENTS.md](../../docs/ascend_a2a3/AGENTS.candidate.md) — 项目级开发规范与代理体系入口
 - [tilelang-op-orchestrator.md](tilelang-op-orchestrator.md) — Primary 代理完整规范
 - [tilelang-op-analyst.md](tilelang-op-analyst.md) — Stage 1 设计代理
 - [tilelang-op-developer.md](tilelang-op-developer.md) — Stage 2/3 开发代理
 - [tilelang-op-perf-tuner.md](tilelang-op-perf-tuner.md) — Stage 3 性能调优代理
-- [.agents/skills/](../../.agents/skills/) — Skill 库
+- [.agents/skills/](../../.agents/skills) — Skill 库

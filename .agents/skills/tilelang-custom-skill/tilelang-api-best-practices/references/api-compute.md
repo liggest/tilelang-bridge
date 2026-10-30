@@ -24,7 +24,7 @@
 - `transpose_B`：是否转置 B（默认 False）
 - `init`：是否在计算前将 C 清零（默认 False）。第一次迭代需要清零，后续累加。
 
-**示例**（来自 `examples/gemm/example_gemm.py`）：
+**示例**（来自 `examples/ascend_a2a3/gemm/example_gemm.py`）：
 
 ```python
 A_L1 = T.alloc_L1([block_M, block_K], dtype)
@@ -69,8 +69,8 @@ T.gemm_v0(q_l1, k_l1, acc_s_l0c, transpose_B=True, init=True)
 
 **示例**：int8 GEMM 的正确 block size 选择
 ```python
-block_M = 64   # ≥ 16 ✓
-block_N = 16   # ≥ 16 ✓（满足 L0B/L0C 分形限制）
+block_M = 64  # ≥ 16 ✓
+block_N = 16  # ≥ 16 ✓（满足 L0B/L0C 分形限制）
 block_K = 256  # ≥ 32 ✓（int8 的 L0A/L0B K 维度限制）
 ```
 
@@ -152,7 +152,7 @@ T.reduce_max(in_shared, out_shared, dim=-1, real_shape=[4, 4])
 普通 kernel 优先省略 `tmp`，由编译器管理。只有 Expert 模式需要把某次调用纳入显式 UB
 地址规划时才提供 arena；当前没有公开 size-query，不能凭经验猜测非零容量。通用 arena 的
 支持 API、结构和对齐契约以
-[`docs/language_ref/tilelibrary.md`](../../../../../docs/language_ref/tilelibrary.md#temporary-workspace-arenas)
+[`docs/ascend_a2a3/language_ref/tilelibrary.md`](../../../../../docs/ascend_a2a3/language_ref/tilelibrary.md#temporary-workspace-arenas)
 为准。`workspace_idx` 是 runtime GM workspace，不是这里的 UB scratch。
 
 `row_expand_*_experiment` 的 `tmp` 会改变 `src1` 布局，不能套用通用 byte-arena 规则；
@@ -204,7 +204,7 @@ for i, j in T.Parallel(block_M // VEC_NUM, block_N):
 
 ```python
 for i in range(block_M // VEC_NUM):  # 行顺序
-    for j in T.Parallel(block_N):    # 列并行
+    for j in T.Parallel(block_N):  # 列并行
         c_ub[i, j] = a_ub[i, j] * b_ub[i, j]
 ```
 
@@ -261,7 +261,7 @@ CUDA 代码中的以下模式在 Ascend 上需要改写：
 ```python
 # CUDA 版本（SIMT，逐元素条件判断）
 for i in T.Parallel(N):
-    if a[i] > threshold:      # ❌ Ascend 不支持
+    if a[i] > threshold:  # ❌ Ascend 不支持
         b[i] = a[i] * scale
     else:
         b[i] = a[i]
@@ -356,8 +356,8 @@ Pass 设计详见 `.agents/skills/tilelang-pass-analyzer/references/pass-designs
 **mode 取值**：`"EQ"`, `"NE"`, `"GT"`, `"GE"`, `"LT"`, `"LE"`
 
 ```python
-T.tile.compare(c_ub, a_ub, b_ub, "EQ")   # tensor vs tensor
-T.tile.compare(c_ub, a_ub, 1.0, "GT")     # tensor vs scalar
+T.tile.compare(c_ub, a_ub, b_ub, "EQ")  # tensor vs tensor
+T.tile.compare(c_ub, a_ub, 1.0, "GT")  # tensor vs scalar
 ```
 
 **约束**：
@@ -392,8 +392,7 @@ T.tile.select(c_ub, mask_ub, a_ub, b_ub, "VSEL_TENSOR_TENSOR_MODE")
 
 ```python
 # 按 N 和 dtype 编译期选择（N 是 JIT 常量，零运行时开销）
-sel_mode = "VSEL_CMPMASK_SPR" if (N <= 64 and dtype != "int32") \
-           else "VSEL_TENSOR_TENSOR_MODE"
+sel_mode = "VSEL_CMPMASK_SPR" if (N <= 64 and dtype != "int32") else "VSEL_TENSOR_TENSOR_MODE"
 ```
 
 **NaN 行为（IEEE 754）**：
@@ -403,9 +402,9 @@ sel_mode = "VSEL_CMPMASK_SPR" if (N <= 64 and dtype != "int32") \
 解法：用 `EQ(curr, curr)` 自比较检测 NaN（NaN 时返回 False，正常值和 inf 返回 True），串联两次 select：
 
 ```python
-T.tile.compare(mask_le, curr, run_min, "LE")       # 正常比较
-T.tile.compare(mask_nan, curr, curr, "EQ")          # NaN 检测
-T.tile.select(run_idx, mask_le, idx_curr, run_idx, sel_mode)   # 正常更新
+T.tile.compare(mask_le, curr, run_min, "LE")  # 正常比较
+T.tile.compare(mask_nan, curr, curr, "EQ")  # NaN 检测
+T.tile.select(run_idx, mask_le, idx_curr, run_idx, sel_mode)  # 正常更新
 T.tile.select(run_idx, mask_nan, run_idx, idx_curr, sel_mode)  # NaN 时强制更新
 ```
 
@@ -469,7 +468,7 @@ T.tile.cast(b_ub, a_ub, "CAST_RINT", 4096)
 | int8 / uint8 | ❌ 回退标量 | 1 字节（`sizeof(T)==1` 不满足） → kernel 内 `T.tile.cast` 到 float16 后用硬件指令 |
 | int64 | ❌ 回退标量 | 8 字节（`sizeof(T)==8` 不满足）→ 优先 record-aware DMA；通用路径用块 DMA + UB-local reorder，并做最大 case 验证 |
 
-> **判断方法**：查看 `src/tl_templates/ascend/common.h` 的 `Transpose` 模板特化，确认目标 dtype 是否在硬件支持集合。或用 `get_kernel_source()` 查看是否出现 `SetValue`（标量回退标志）。
+> **判断方法**：查看 `src/ascend/a2a3/tl_templates/ascend/common.h` 的 `Transpose` 模板特化，确认目标 dtype 是否在硬件支持集合。或用 `get_kernel_source()` 查看是否出现 `SetValue`（标量回退标志）。
 
 **bfloat16 处理方法（host 侧零拷贝 reinterpret）**：
 
@@ -494,9 +493,9 @@ a_cal = T.alloc_ub((block_M, block_N), cal_dtype)
 b_cal = T.alloc_ub((block_N, block_M), cal_dtype)
 
 if use_b16_cast:
-    T.tile.cast(a_cal, a_ub, "CAST_NONE", tile_elem)     # int8 → float16
-    T.tile.transpose(b_cal, a_cal)                        # float16 硬件 transpose
-    T.tile.cast(b_ub, b_cal, "CAST_RINT", tile_elem)      # float16 → int8
+    T.tile.cast(a_cal, a_ub, "CAST_NONE", tile_elem)  # int8 → float16
+    T.tile.transpose(b_cal, a_cal)  # float16 硬件 transpose
+    T.tile.cast(b_ub, b_cal, "CAST_RINT", tile_elem)  # float16 → int8
 else:
     T.tile.transpose(b_ub, a_ub)
 ```
@@ -532,18 +531,18 @@ fallback；禁止逐元素 strided GM load/store。
 valid_m = T.min(block_M, M - m_start)
 valid_n = T.min(block_N, N - n_start)
 T.copy(
-    x[b, m_start:m_start + valid_m, n_start:n_start + valid_n],
+    x[b, m_start : m_start + valid_m, n_start : n_start + valid_n],
     a_ub[0:valid_m, 0:valid_n],
 )
 T.tile.transpose(b_ub, a_ub)  # int64 可在 UB 内标量 lowering
 T.copy(
     b_ub[0:valid_n, 0:valid_m],
-    y[b, n_start:n_start + valid_n, m_start:m_start + valid_m],
+    y[b, n_start : n_start + valid_n, m_start : m_start + valid_m],
 )
 ```
 
 这条路线不声称 int64 获得硬件 transpose；它保证 GM 两侧仍是块 DMA，并把慢路径
-限制在 UB。可参考 `examples/transpose/transpose.py::_kernel_3d` 的动态切片结构。
+限制在 UB。可参考 `examples/ascend_a2a3/transpose/transpose.py::_kernel_3d` 的动态切片结构。
 若实测没有收益，结论应是“该硬件适配对 int64 不适用”，而不是强制改写。
 
 5. 验证同时覆盖：非整除尾块、`torch.npu.synchronize()` 后无 ACL/AICore 错误、
@@ -589,13 +588,25 @@ else:
 
 ```python
 @tilelang.jit(out_idx=[1], pass_configs=PASS_CONFIGS)
-def kernel(total_numel, M, N, dtype, block_M, block_N,
-           src_stride_m, src_stride_n,           # JIT 编译期常量
-           dst_stride_n, dst_stride_m,
-           nbatch, batch_num, core_num, single_core_load,
-           src_batch_strides,                     # Python tuple
-           dst_batch_strides,
-           batch_dims_sizes):
+def kernel(
+    total_numel,
+    M,
+    N,
+    dtype,
+    block_M,
+    block_N,
+    src_stride_m,
+    src_stride_n,  # JIT 编译期常量
+    dst_stride_n,
+    dst_stride_m,
+    nbatch,
+    batch_num,
+    core_num,
+    single_core_load,
+    src_batch_strides,  # Python tuple
+    dst_batch_strides,
+    batch_dims_sizes,
+):
     # kernel 内用 alloc_var 累加 batch 偏移，stride 是编译期常量直接用
     boff_s = T.alloc_var("int32", init=0)
     # 静态展开（最多 6 个 batch 轴，不存在的用 stride=0/dim=1 填充）
@@ -687,9 +698,9 @@ T.tile.sort(dst, src, actual_num)
 将多个已排序数据块合并，支持 2/3/4-way 归并。输入/输出均为 value-index pair 格式。
 
 ```python
-T.tile.merge_sort(merge_dst, src0, src1)            # 2-way
-T.tile.merge_sort(merge_dst, src0, src1, src2)       # 3-way
-T.tile.merge_sort(merge_dst, src0, src1, src2, src3) # 4-way
+T.tile.merge_sort(merge_dst, src0, src1)  # 2-way
+T.tile.merge_sort(merge_dst, src0, src1, src2)  # 3-way
+T.tile.merge_sort(merge_dst, src0, src1, src2, src3)  # 4-way
 ```
 
 #### T.tile.topk(dst, src, K, actual_num)

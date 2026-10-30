@@ -2,7 +2,7 @@
 
 本文档给出一个 Vector 算子核内 MTE2/V/MTE3 流水的参考写法。目标不是覆盖所有 elementwise 算子，而是提供一个清晰的三阶段结构，便于后续把 `T.tile.add` 替换成目标算子的 Vector 计算。
 
-基线来源：`examples/elementwise/elementwise_add.py`
+基线来源：`examples/ascend_a2a3/elementwise/elementwise_add.py`
 
 ## 适用场景
 
@@ -86,8 +86,8 @@ next_row = bx * block_M + vid * rows_per_vec + (tile + 1) * sub_M
 
 ```python
 T.set_flag("mte3", "mte2", stage)  # stage 可重新搬入
-T.set_flag("mte2", "v", stage)     # stage 输入可被计算
-T.set_flag("v", "mte3", stage)     # stage 输出可被写回
+T.set_flag("mte2", "v", stage)  # stage 输入可被计算
+T.set_flag("v", "mte3", stage)  # stage 输出可被写回
 ```
 
 调优时不要机械保留 `T.barrier_all()`；优先把依赖写成 `set_flag/wait_flag`，让 MTE2、Vector、MTE3 三条 pipeline 有机会重叠。
@@ -210,9 +210,9 @@ def vec_add_pipeline(M, N, block_M, block_N, sub_M, dtype="float"):
 
     @T.prim_func
     def main(
-            A: T.Tensor((M, N), dtype),
-            B: T.Tensor((M, N), dtype),
-            C: T.Tensor((M, N), dtype),
+        A: T.Tensor((M, N), dtype),
+        B: T.Tensor((M, N), dtype),
+        C: T.Tensor((M, N), dtype),
     ):
         with T.Kernel(m_num * n_num, is_npu=True) as (cid, vid):
             bx = cid // n_num

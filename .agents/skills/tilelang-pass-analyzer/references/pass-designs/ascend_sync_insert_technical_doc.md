@@ -1,3 +1,5 @@
+> TA 0deb8b93 来源算法参考：本页行号、旧IR与注册代码是原版本资料，不能作为当前可编译模板。现行接口以本地pipeline/native源码、main IR技能和pass-generate/references/integration-points.md为准。
+
 # Ascend Sync Insert Pass 技术说明文档
 
 **源码位置**：`src/transform/ascend_sync_insert.cc`
@@ -449,20 +451,23 @@ pass_configs = {
     tilelang.PassConfigKey.TL_ASCEND_AUTO_SYNC: True,
 }
 
+
 @tilelang.jit(out_idx=[1], pass_configs=pass_configs)
 def test_sync(M=256, N=256):
     @T.prim_func
-    def main(A: T.Tensor((M, N), 'float'), B: T.Tensor((M, N), 'float')):
+    def main(A: T.Tensor((M, N), "float"), B: T.Tensor((M, N), "float")):
         with T.Kernel(1, is_npu=True) as (cid, vid):
-            ub1 = T.alloc_ub((M, N), 'float')
-            ub2 = T.alloc_ub((M, N), 'float')
+            ub1 = T.alloc_ub((M, N), "float")
+            ub2 = T.alloc_ub((M, N), "float")
             T.copy(A, ub1)
             T.tile.add(ub2, ub1, ub1)
             T.copy(ub2, B)
+
     return main
 
+
 func = test_sync()
-print(func.ir_module['main'])
+print(func.ir_module["main"])
 ```
 
 ---

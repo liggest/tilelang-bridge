@@ -1,3 +1,5 @@
+> TA 0deb8b93 来源算法参考：本页行号、旧IR与注册代码是原版本资料，不能作为当前可编译模板。现行接口以本地pipeline/native源码、main IR技能和pass-generate/references/integration-points.md为准。
+
 # AscendInferBufferScope Pass 设计文档
 
 ## 1. 背景与目标
@@ -38,7 +40,7 @@
 
 ```python
 mod = tilelang.transform.InjectTmpBuffer(target)(mod)
-mod = tilelang.transform.AscendInferBufferScope()(mod)   # ← 本 pass
+mod = tilelang.transform.AscendInferBufferScope()(mod)  # ← 本 pass
 mod = tilelang.transform.AscendVidReduction()(mod)
 mod = tilelang.transform.BufferShapeCollector()(mod)
 ```
@@ -387,16 +389,16 @@ def DetermineGEMMPosition(call, arg_idx, func_name):
 # 伪代码
 def InferByAscendCopy(handle, alloc, pos_info):
     qualified = False
-    for (_, second) in pos_info.first_second_pairs:
+    for _, second in pos_info.first_second_pairs:
         second_scope = alloc_info[second].corrected_scope
         if second_scope in {"wmma.matrix_a", "wmma.matrix_b"}:
             qualified = True
             break
 
     if qualified:
-        alloc.corrected_scope = "shared.l1"   # L1（参与 Cube 搬运链）
+        alloc.corrected_scope = "shared.l1"  # L1（参与 Cube 搬运链）
     else:
-        alloc.corrected_scope = "shared.ub"       # UB（普通 Vector 中转）
+        alloc.corrected_scope = "shared.ub"  # UB（普通 Vector 中转）
 ```
 
 第三阶段进一步处理"UB 配对"：如果一个 ascend_copy 中 first 已经是 UB(shared.ub)，而 second 没有任何 cube/vector 直接使用，则把 second 也降级为 UB，避免一对 ascend_copy 横跨 UB 与 L1 两个不同 scope 造成下游 codegen 混乱。
@@ -407,9 +409,9 @@ def InferByAscendCopy(handle, alloc, pos_info):
 
 ```python
 # 前端 DSL
-A_l1   = T.alloc_shared((M, K), "float16")      # 抽象 shared
-B_l1   = T.alloc_shared((K, N), "float16")      # 抽象 shared
-C_l0c  = T.alloc_fragment((M, N), "float32")    # 抽象 local.fragment
+A_l1 = T.alloc_shared((M, K), "float16")  # 抽象 shared
+B_l1 = T.alloc_shared((K, N), "float16")  # 抽象 shared
+C_l0c = T.alloc_fragment((M, N), "float32")  # 抽象 local.fragment
 
 T.copy(A_gm, A_l1)
 T.copy(B_gm, B_l1)
@@ -550,4 +552,3 @@ InjectTmpBuffer → AscendInferBufferScope → AscendVidReduction → BufferShap
 | `AscendMemoryPlanning` | 各 buffer 落在 L0A / L0B / L0C / L1 / UB | 分级别规划地址、做内存复用 |
 | `AscendSyncInsert` | scope 决定 pipeline 类型（MTE1/MTE2/MTE3/M/V/FIX） | 选择 `set_flag` / `wait_flag` 指令 |
 | `CombineCV` | scope 区分 Cube/Vector 操作 | 把 `shared.l1` 归 Cube，`shared.ub` 归 Vector |
-

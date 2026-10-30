@@ -47,30 +47,30 @@
 │    典型算子: W4A8 GEMM, Flash Attention, 量化 GEMM
 │
 ├─ 纯 element-wise（逐元素运算）
-│   参考: examples/elementwise/*.py, examples/activation/*.py
+│   参考: examples/ascend_a2a3/elementwise/*.py, examples/ascend_a2a3/activation/*.py
 │   ├─ 单步运算 → Developer 模式
 │   │   API: T.Parallel + 算术符号
 │   │   内存: T.alloc_shared（编译器映射到 UB）
 │   │
 │   └─ 多步运算（如 softmax、layer_norm）
-│       参考: examples/softmax/*.py, examples/normalization/*.py
+│       参考: examples/ascend_a2a3/softmax/*.py, examples/ascend_a2a3/normalization/*.py
 │       ├─ 需精细 buffer 控制 → Expert 模式
 │       └─ 无需精细控制 → Developer 模式
 │
 ├─ 含归约（reduce_sum / reduce_max / reduce_min）
-│   参考: examples/reduce/*.py
+│   参考: examples/ascend_a2a3/reduce/*.py
 │   API: T.reduce_sum / T.reduce_max / T.reduce_min
 │   内存: T.alloc_shared → UB
 │
 ├─ 含分组/动态批次
-│   参考: examples/grouped_gemm/*.py（重要！）
+│   参考: examples/ascend_a2a3/grouped_gemm/*.py（重要！）
 │   关键技术:
 │   - block_metadata 预计算表（替代三维 Kernel）
 │   - 静态循环边界 + 条件判断（替代动态边界）
 │   Kernel: T.Kernel(total_blocks) + 手动索引分解
 │
 └─ 其他复杂算子
-    强制步骤: 先搜索本项目 examples/
+    强制步骤: 先搜索本项目 examples/ascend_a2a3/
 ```
 
 ## 3. NPU 硬件约束

@@ -1,82 +1,22 @@
-# TileLang-Ascend 架构参考
+# 当前 A2/A3 架构与 TA 来源
 
-## 编译流程
+A2/A3 的当前实现遵循主线 BackendModule 合同。先读 `tilelang/backend/README.md` 和 `.agents/skills/tilelang-backend/SKILL.md`；本文件只补 TA 特有位置，不能据旧全局 phase.py 再造执行后端。
 
-```
-Python DSL (@tilelang.jit)
-  → IR 变换 Pass (tilelang/transform/ + src/transform/)
-  → 代码生成 (src/target/codegen_ascend_pto.cc)
-  → 模板库 (src/tl_templates/)
-  → CANN 工具链编译
-  → NPU 执行
-```
-
-## 关键变换 Pass 链
-
-```
-frontend_legalize → layout_inference → flatten_buffer → loop_vectorize
-→ inject_pipeline → ascend_lower_parallel_to_vector → ascend_memory_planning
-→ ascend_sync_insert → ascend_combinecv → lower_tile_op
+```text
+tilelang.ascend.a2a3.language (common eager frontend)
+  -> BackendContext: frozen Target arch=dav-2201, model=A2/A3, keys=ascend/pto
+  -> tilelang/ascend/a2a3/pipeline.py (PassPipeline)
+  -> tilelang/ascend/a2a3/codegen.py (instrumented source codegen)
+  -> compiler.py CompileConfig (dialect=ascendc/pto, frozen before cache lookup)
+  -> shared cython executor / backend-local ABI, cache, workspace support
 ```
 
-## 目录结构
+`src/ascend/a2a3/{op,layout,transform,codegen,tl_templates}` 拥有本地 native；Python pass wrapper在 `tilelang/ascend/a2a3/transform`，transform factories 多数以 `tvm.ffi.get_global_func` 查隔离FFI；language/layout另使用 `_native.require_native` guard。共用原语与配置各有唯一 owner，不能覆盖 A5 或重新注册共享 flag Op。
 
-```
-tilelang-ascend/
-├── tilelang/              # Python 前端
-│   ├── jit/               # JIT 编译 (@tilelang.jit)
-│   ├── language/          # DSL 原语定义
-│   │   ├── ascend.py      # Ascend 操作
-│   │   ├── ascend_tile.py # Tile 级操作 (56KB, 最大模块)
-│   │   ├── pto.py         # PTO 模式
-│   │   ├── gemm.py        # 矩阵乘法
-│   │   ├── copy_op.py     # 数据搬运
-│   │   ├── reduce.py      # 归约操作
-│   │   ├── allocate.py    # 内存分配
-│   │   └── parallel.py    # 并行化
-│   ├── engine/            # 编译引擎 (lower.py)
-│   ├── transform/         # Python 侧 IR 变换
-│   ├── autotuner/         # 自动调优
-│   ├── carver/            # 调度与资源映射
-│   ├── layout/            # 内存布局
-│   ├── intrinsics/        # 硬件内建函数
-│   └── profiler/          # 性能分析
-├── src/                   # C++ 后端
-│   ├── target/            # 代码生成
-│   │   ├── codegen_ascend_pto.cc  # 主要: PTO 代码生成 (3225行)
-│   │   ├── codegen_ascend.cc      # Ascend C 代码生成 (2050行)
-│   │   └── rt_mod_ascend*.cc      # 运行时模块
-│   ├── transform/         # C++ 侧 IR 变换 (47个文件)
-│   │   ├── ascend_storage_rewrite.cc     # 存储重写 (70KB)
-│   │   ├── ascend_sync_insert.cc         # 同步插入 (46KB)
-│   │   ├── ascend_lower_parallel_to_vector.cc  # 向量化 (49KB)
-│   │   ├── ascend_memory_planning.cc     # 内存规划 (24KB)
-│   │   └── cross_core_pipeline.cc        # 核间流水 (35KB)
-│   ├── tl_templates/      # 代码生成模板
-│   └── op/                # 算子定义
-├── examples/              # 31类算子示例
-├── testing/python/        # 测试
-├── docs/                  # 文档
-└── 3rdparty/              # 第三方依赖 (TVM, pto-isa)
-```
+实际顺序以 `LowerAndLegalize` 与 `OptimizeForTarget` 两函数为准：infer scope -> tmp -> vid -> shape collection -> HostProcesser -> LowerParallel -> LayoutInference -> LowerTileOp；优化阶段包含 CrossCore/CombineCV、软件流水、Flatten/Vectorize/Storage、MemoryPlanning、Sync/SyncVS、ResourceScopeVerify。仅 AscendC A2/A3 使用最后 Selection/MaskLegalize；之后不得再改写 IR。不要把这个摘要替代完整源中的条件、参数与前置 MaterializeKernelLaunch。
 
-## 硬件原语映射
+新 IR 是 `tvm.tirx`；`s_tir` 仅提供明确共享变换。旧 `vid` 对应 `cthread`，默认/显式 launch 标记不同。`Var()` 创建真实 Var，不表示缺失；依 main IR skill 用 `Optional<Var>` 表达空状态。Buffer/Var/节点身份和结构相等按主线技能区分。
 
-| DSL 原语 | 硬件资源 |
-|---------|---------|
-| `T.alloc_L1` | L1 缓存 (Cube 核) |
-| `T.alloc_ub` | 统一缓冲区 (Vector 核) |
-| `T.alloc_L0A/L0B/L0C` | L0 寄存器 |
-| `T.gemm` / `T.mma` | 矩阵乘法加速器 |
-| `T.Parallel` | 向量化指令 |
-| `T.Pipelined` | 流水线调度 |
+Python `T.Kernel(..., is_npu=True)`、`T.Scope`、`T.tile`、L1/UB/L0 分级语义来自 TA；A5 `tilelang.ascend.language` 的 MixedKernel/SimdVF 不得作为其替代。`T.gemm` 的 generic GPU 分支不是 A2/A3 矩阵原语支持证明；查真实 `T.mma` / `T.tile` 原语和已迁原例。
 
-## 核心 API
-
-- `@tilelang.jit` — JIT 编译装饰器
-- `T.alloc_L1/ub/L0A/L0B/L0C` — 多级内存分配
-- `T.copy` — 数据搬运
-- `T.gemm` / `T.mma` — 矩阵计算
-- `T.Parallel` — 向量化
-- `T.Pipelined` — 流水线
-- `T.printf` / `T.dump_tensor` — 调试
+原架构图和文件行数保留在对应 `_source_config/skill-sources` 来源文件中，不作为当前架构事实。

@@ -22,8 +22,7 @@ def add_kernel(
     A: T.Tensor((M, N), dtype),
     B: T.Tensor((M, N), dtype),
     C: T.Tensor((M, N), dtype),
-):
-    ...
+): ...
 ```
 
 **支持的 dtype**：
@@ -34,10 +33,11 @@ def add_kernel(
 ### 动态 shape 符号
 
 - 使用 `T.symbolic(name, dtype)` 创建动态维度；`T.dyn` 和 `T.dynamic` 不在当前
-  `tilelang.language` 公开接口中。
+  `tilelang.ascend.a2a3.language` 公开接口中。
 
 ```python
 K = T.symbolic("K", "int32")
+
 
 @T.prim_func
 def foo(A: T.Tensor((K,), "float32")):
@@ -84,15 +84,15 @@ def tile_add(M, N, block_M, block_N, dtype='float'):
 
 `compile_flags` 会进入 kernel cache key，且显式参数追加在 framework defaults 之后。
 优先使用它而不是修改 `TL_CCE_*` / `TL_PTO_DEBUG` 进程环境。完整契约和示例见
-[`docs/tutorials/jit_compilation.md`](../../../../../docs/tutorials/jit_compilation.md)。
+[`docs/tutorials/jit_compilation.md`](../../../../../docs/ascend_a2a3/tutorials/jit_compilation.md)。
 
 **常用 pass_configs**：
 ```python
 pass_configs = {
-    tilelang.PassConfigKey.TL_ASCEND_AUTO_SYNC: True,         # 自动同步插入（核内）
-    tilelang.PassConfigKey.TL_ASCEND_MEMORY_PLANNING: True,   # 自动内存规划
-    tilelang.PassConfigKey.TL_ASCEND_AUTO_CV_COMBINE: True,   # 自动CV分离（核间流水线需要）
-    tilelang.PassConfigKey.TL_ASCEND_AUTO_CV_SYNC: True,      # 自动同步插入（CV核间）
+    tilelang.PassConfigKey.TL_ASCEND_AUTO_SYNC: True,  # 自动同步插入（核内）
+    tilelang.PassConfigKey.TL_ASCEND_MEMORY_PLANNING: True,  # 自动内存规划
+    tilelang.PassConfigKey.TL_ASCEND_AUTO_CV_COMBINE: True,  # 自动CV分离（核间流水线需要）
+    tilelang.PassConfigKey.TL_ASCEND_AUTO_CV_SYNC: True,  # 自动同步插入（CV核间）
 }
 ```
 
@@ -125,7 +125,7 @@ def kernel(M, N, K, ...):
 ```
 > 注意：定义 workspace buffer 时，名称也应包含 "workspace"
 
-2. 数据流示例（来自 `examples/quant_batch_matmul`）：
+2. 数据流示例（来自 `examples/ascend_a2a3/quant_batch_matmul`）：
 ```python
 # GEMM 输出 (L0C) → workspace → Vector 核处理
 T.copy(C_L0, workspace[bm * block_M, bn * block_N])
@@ -187,7 +187,7 @@ b = T.alloc_var("int32", init=a)  # 用另一个变量的值初始化
 | `T.alloc_L0B(shape, dtype)` | L0B Buffer | `wmma.matrix_b` | Cube 右矩阵 |
 | `T.alloc_L0C(shape, dtype)` | L0C Buffer | `wmma.accumulator` | Cube 输出/累加 |
 
-**实际使用示例**（来自 `examples/gemm/example_gemm.py`）：
+**实际使用示例**（来自 `examples/ascend_a2a3/gemm/example_gemm.py`）：
 
 ```python
 A_L1 = T.alloc_L1([block_M, block_K], dtype)
@@ -262,7 +262,7 @@ T.copy(c_ub, C[bx * block_M + vid * block_M // VEC_NUM, by * block_N])
 T.copy(C_L0, C[bx * block_M, by * block_N])
 
 # BufferRegion 切片搬运
-T.copy(K[bz, by, k * block_N:(k + 1) * block_N, :], k_l1)
+T.copy(K[bz, by, k * block_N : (k + 1) * block_N, :], k_l1)
 ```
 
 #### T.copy 动态 shape 切片
@@ -299,12 +299,12 @@ T.copy(b_ub, y[b, n_start, m_start])
 valid_m = T.min(block_M, M - m_start)
 valid_n = T.min(block_N, N - n_start)
 T.copy(
-    x[b, m_start:m_start + valid_m, n_start:n_start + valid_n],
+    x[b, m_start : m_start + valid_m, n_start : n_start + valid_n],
     a_ub[0:valid_m, 0:valid_n],
 )
 T.copy(
     b_ub[0:valid_n, 0:valid_m],
-    y[b, n_start:n_start + valid_n, m_start:m_start + valid_m],
+    y[b, n_start : n_start + valid_n, m_start : m_start + valid_m],
 )
 ```
 
@@ -373,16 +373,16 @@ block_M_2 = block_M // VEC_NUM  # 每个 V 核处理一半行数
 with T.Kernel(grid_size, is_npu=True) as (cid, vid):
     # 计算 V 核负责的起始行
     row_start = cid * block_M + vid * block_M_2
-    
+
     # 分配 buffer（只需分配 V 核负责的行数）
     data_ub = T.alloc_shared((block_M_2, block_N), dtype)
-    
+
     # 读入数据
     T.copy(A[row_start, by * block_N], data_ub)
-    
+
     # 计算
     ...
-    
+
     # 写出数据
     T.copy(data_ub, B[row_start, by * block_N])
 ```
@@ -399,7 +399,7 @@ VEC_NUM = 2
 with T.Kernel(num_tasks, is_npu=True) as (cid, vid):
     # 每个 V 核处理不同的任务
     task_id = cid * VEC_NUM + vid
-    
+
     if task_id < total_tasks:
         # 处理 task_id
         ...
@@ -413,16 +413,16 @@ with T.Kernel(num_tasks, is_npu=True) as (cid, vid):
 # 错误：读写索引不一致
 for row in T.serial(block_N_2):
     actual_row = bn * block_N + vid * block_N_2 + row
-    T.copy(src[actual_row, ...], temp_ub)   # 读用 actual_row ✓
+    T.copy(src[actual_row, ...], temp_ub)  # 读用 actual_row ✓
     # ... 处理 ...
     T.copy(temp_ub, dst[bn * block_N + row, ...])  # ❌ 写没用 actual_row
 
 # 正确：读写索引一致
 for row in T.serial(block_N_2):
     actual_row = bn * block_N + vid * block_N_2 + row
-    T.copy(src[actual_row, ...], temp_ub)   # 读用 actual_row ✓
+    T.copy(src[actual_row, ...], temp_ub)  # 读用 actual_row ✓
     # ... 处理 ...
-    T.copy(temp_ub, dst[actual_row, ...])   # 写也用 actual_row ✓
+    T.copy(temp_ub, dst[actual_row, ...])  # 写也用 actual_row ✓
 ```
 
 **原则**：同一数据在不同阶段的索引必须基于相同的计算逻辑。
@@ -436,8 +436,8 @@ Cube 核做 GEMM 时，不使用 vid 切分，读取完整的 block：
 A_L1 = T.alloc_shared((block_M, block_K), dtype)  # 完整 block_M
 B_L1 = T.alloc_shared((block_N, block_K), dtype)  # 完整 block_N
 
-T.copy(A[bm * block_M, k_offset], A_L1)   # 完整 block_M
-T.copy(B[bn * block_N, k_offset], B_L1)   # 完整 block_N
+T.copy(A[bm * block_M, k_offset], A_L1)  # 完整 block_M
+T.copy(B[bn * block_N, k_offset], B_L1)  # 完整 block_N
 T.gemm_v0(A_L1, B_L1, C_L0, ...)
 ```
 
@@ -445,11 +445,11 @@ T.gemm_v0(A_L1, B_L1, C_L0, ...)
 
 ## 5. 完整示例
 
-来自 `docs/TileLang-Ascend Programming Guide.md` §2.2：
+来自 `docs/ascend_a2a3/TileLang-Ascend Programming Guide.md` §2.2：
 
 ```python
 import tilelang
-import tilelang.language as T
+import tilelang.ascend.a2a3.language as T
 from tilelang import jit
 import torch
 
@@ -462,8 +462,9 @@ pass_configs = {
     tilelang.PassConfigKey.TL_ASCEND_MEMORY_PLANNING: True,
 }
 
+
 @jit(out_idx=[-1], pass_configs=pass_configs)
-def tile_add(M: int, N: int, block_M: int, block_N: int, dtype: str = 'float'):
+def tile_add(M: int, N: int, block_M: int, block_N: int, dtype: str = "float"):
     m_num = M // block_M
     n_num = N // block_N
 
@@ -490,6 +491,7 @@ def tile_add(M: int, N: int, block_M: int, block_N: int, dtype: str = 'float'):
             T.copy(c_ub, C[bx * block_M + vid * block_M // VEC_NUM, by * block_N])
 
     return add_kernel
+
 
 func = tile_add(M, N, block_M, block_N)
 a = torch.randn(M, N).npu()

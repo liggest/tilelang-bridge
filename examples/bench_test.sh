@@ -2,6 +2,8 @@
 
 # ================= 参数解析 =================
 SKIP_PYTEST=false
+COLLECT_ONLY=false
+COLLECT_JSON=""
 ENABLE_COVERAGE=false
 ENABLE_CPP_COVERAGE=false
 TEST_DIRS=""
@@ -9,6 +11,18 @@ EXPERIMENT_DIRS=""
 PYTEST_MARKERS=""
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --collect-only)
+            COLLECT_ONLY=true
+            shift
+            ;;
+        --collect-json)
+            if [[ $# -lt 2 || "$2" == --* ]]; then
+                echo "Error: --collect-json requires a path" >&2
+                exit 1
+            fi
+            COLLECT_JSON="$2"
+            shift 2
+            ;;
         --skip-pytest)
             SKIP_PYTEST=true
             shift
@@ -58,8 +72,26 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [ "$COLLECT_ONLY" = true ] && { [ "$ENABLE_COVERAGE" = true ] || [ "$ENABLE_CPP_COVERAGE" = true ]; }; then
+    echo "Error: collection-only cannot clean or collect coverage" >&2
+    exit 1
+fi
+
 # ================= 全局环境变量设置 =================
-PROJECT_ROOT="$(cd .. && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)" || exit 1
+PATH_RESOLVER="${PROJECT_ROOT}/scripts/ci/path_layout.py"
+EXAMPLES_REL=$(python "$PATH_RESOLVER" --path examples) || exit 1
+EXPERIMENT_REL=$(python "$PATH_RESOLVER" --path examples_experiment) || exit 1
+PYTEST_PATHS=$(python "$PATH_RESOLVER" --pytest-targets) || exit 1
+PYTEST_TARGETS=()
+while IFS= read -r target; do
+    [ -n "$target" ] && PYTEST_TARGETS+=("${PROJECT_ROOT}/$target")
+done <<< "$PYTEST_PATHS"
+PYTEST_CI_ARGS=(-c "${PROJECT_ROOT}/ci/pytest-ascend.ini")
+TA_TEST_HELPERS=$(python "$PATH_RESOLVER" --path testing/python) || exit 1
+export PYTHONPATH="${PROJECT_ROOT}/${TA_TEST_HELPERS}${PYTHONPATH:+:$PYTHONPATH}"
+cd "${PROJECT_ROOT}/${EXAMPLES_REL}" || exit 1
 
 # An operator listed here is covered by its Pytest test, which the workflow
 # runs separately; executing it here as well would compile and run the same
@@ -78,15 +110,16 @@ if [ -f "$OPERATOR_TEST_RESOLVER" ]; then
         exit 1
     fi
     python "$OPERATOR_TEST_RESOLVER" check-orphans
+    MAPPING_TSV=$(python "$OPERATOR_TEST_RESOLVER" list --format tsv) || exit 1
     while IFS=$'\t' read -r source test; do
         [ -n "$source" ] || continue
         MIGRATED_SOURCES["$source"]=1
         MIGRATED_TESTS["$test"]=1
-    done < <(python "$OPERATOR_TEST_RESOLVER" list --format tsv)
+    done <<< "$MAPPING_TSV"
 fi
 
 # experiment 算子根目录（相对 examples 工作目录）
-EXPERIMENT_ROOT="../examples_experiment"
+EXPERIMENT_ROOT="${PROJECT_ROOT}/${EXPERIMENT_REL}"
 
 # 解析 TEST_DIRS / EXPERIMENT_DIRS 为数组
 DIR_ARRAY=()
@@ -102,6 +135,22 @@ if [ -n "$TEST_DIRS" ] || [ -n "$EXPERIMENT_DIRS" ]; then
 else
     echo "Running full tests (all directories, examples + experiment)"
 fi
+# Scope exceptions are not migrated tests and never contribute to pass counts.
+# Resolve once outside the collector's command-substitution subshells.
+SCOPE_ARGS=()
+[ -n "$TEST_DIRS" ] && SCOPE_ARGS+=(--dirs "${DIR_ARRAY[@]}")
+[ -n "$EXPERIMENT_DIRS" ] && SCOPE_ARGS+=(--experiment-dirs "${EXP_DIR_ARRAY[@]}")
+SCOPE_RESOLVER="${PROJECT_ROOT}/scripts/ci/ci_scope.py"
+SCOPE_TSV=$(python "$SCOPE_RESOLVER" "${SCOPE_ARGS[@]}" --format tsv) || exit 1
+declare -A DEFERRED_SOURCES=()
+scope_deferred_count=0
+while IFS=$'\t' read -r source reason; do
+    [ -n "$source" ] || continue
+    DEFERRED_SOURCES["$source"]="$reason"
+    scope_deferred_count=$((scope_deferred_count + 1))
+    echo "[DEFERRED] $source: $reason"
+done <<< "$SCOPE_TSV"
+echo "Scope deferred: $scope_deferred_count (not executed; excluded from pass counts)"
 # ===========================================
 
 # ================= 配置区 =================
@@ -128,38 +177,38 @@ if [ "$ENABLE_COVERAGE" = true ] || [ "$ENABLE_CPP_COVERAGE" = true ]; then
     echo "====================================="
     echo "Cleaning old coverage data..."
     echo "====================================="
-      
+
     # 1. 清除 Python coverage 数据
     echo "Removing Python coverage files..."
     rm -rf "${PROJECT_ROOT}/coverage_data/.coverage*" 2>/dev/null || true
     rm -f "${PROJECT_ROOT}/coverage_data/*.json" 2>/dev/null || true
-    
+
     echo "  ✓ Python coverage files cleaned"
-    
+
     # 2. 清除 C++ coverage 数据（如果启用）
     if [ "$ENABLE_CPP_COVERAGE" = true ]; then
         echo "Removing C++ coverage files..."
-        
+
         # 清除 build 目录的 .gcda 文件（运行时覆盖率数据）
         find "${PROJECT_ROOT}/build" -name "*.gcda" -type f -delete 2>/dev/null || true
-        
+
         # 清除旧的 coverage.info
         rm -f "${PROJECT_ROOT}/coverage_data/coverage.info" 2>/dev/null || true
-        
+
         echo "  ✓ C++ coverage files cleaned"
     fi
-    
+
     # 3. 清除旧的报告
     echo "Removing old coverage reports..."
     rm -f "${PROJECT_ROOT}/core_files_coverage_report.md" 2>/dev/null || true
     rm -rf "${PROJECT_ROOT}/coverage_reports" 2>/dev/null || true
-    
+
     echo "  ✓ Old reports cleaned"
-    
+
     # 4. 创建干净的目录
     mkdir -p "${PROJECT_ROOT}/coverage_data"
     mkdir -p "${PROJECT_ROOT}/coverage_reports"
-    
+
     echo ""
     echo "✓ Coverage cleanup completed. Ready for fresh test."
     echo "====================================="
@@ -177,6 +226,10 @@ should_skip_python_script() {
     local repo_relative
 
     repo_relative=$(realpath --relative-to="$PROJECT_ROOT" "$candidate")
+    if [[ -n "${DEFERRED_SOURCES[$repo_relative]:-}" ]]; then
+        echo "Skip explicitly deferred source: $candidate (${DEFERRED_SOURCES[$repo_relative]})" >&2
+        return 0
+    fi
     if [[ -n "${MIGRATED_SOURCES[$repo_relative]:-}" ]]; then
         echo "Skip migrated operator in legacy runner: $candidate" >&2
         return 0
@@ -193,7 +246,7 @@ should_skip_python_script() {
 collect_test_scripts() {
     local dir="$1"
     local scripts=()
-    
+
     # 特殊目录：排除整个目录，不收集任何 py 文件
     case "$dir" in
         "./gemm_aot"|"./torch_tl_ascend"|"./dispatch_combine"|"./shmem")
@@ -215,12 +268,12 @@ collect_test_scripts() {
             for f in $py_files; do
                 should_skip_python_script "$f" || scripts+=("$f")
             done
-            
+
             echo "${scripts[@]}"
             return
             ;;
     esac
-    
+
     # 搜索 maxdepth 2 的 py 文件（排除特殊文件和 bench_sfa 子目录）
     local py_files=$(find "$dir" -maxdepth 2 -name "*.py" \
         -not -name "__init__.py" \
@@ -234,11 +287,11 @@ collect_test_scripts() {
     for f in $py_files; do
         should_skip_python_script "$f" || scripts+=("$f")
     done
-    
+
     # 搜索 bash 脚本（特定命名模式）
     local sh_files=$(find "$dir" -maxdepth 2 \( -name "run_*.sh" -o -name "test_*.sh" \) | sort)
     for f in $sh_files; do scripts+=("$f"); done
-    
+
     echo "${scripts[@]}"
 }
 
@@ -304,7 +357,7 @@ if [ -n "$TEST_DIRS" ] || [ -n "$EXPERIMENT_DIRS" ]; then
 else
     # 全量测试：使用 collect_test_scripts 遍历所有目录
     echo "Full test mode - scanning all directories"
-    
+
     # 遍历所有一级目录
     for dir in $(find . -maxdepth 1 -type d -not -name "." -not -name "dispatch_combine" -not -name "shmem" -not -name "exception_dump_test" | sort); do
         collected=$(collect_test_scripts "$dir")
@@ -314,7 +367,7 @@ else
             done
         fi
     done
-    
+
     # EXTRA_TASKS
     for extra_task in "${EXTRA_TASKS[@]}"; do
         et_dir=$(echo "$extra_task" | cut -d'|' -f1)
@@ -349,6 +402,59 @@ fi
 
 echo "Total scripts to run: ${#all_scripts[@]}"
 # =================================================
+
+# Collection stops before any operator/Pytest/CLI execution. This is the same
+# production queue, rather than an independently implemented approximation.
+if [ "$COLLECT_ONLY" = true ]; then
+    python - "$COLLECT_JSON" "$PROJECT_ROOT" "$EXAMPLES_REL" "$scope_deferred_count" "${all_scripts[@]}" <<'PYCOLLECT'
+import json
+from pathlib import Path
+import sys
+
+output, root, examples, deferred, *scripts = sys.argv[1:]
+root = Path(root)
+rows = []
+for index, script in enumerate(scripts, 1):
+    if script.startswith("CUSTOM_TASK::"):
+        directory, command, display = script.removeprefix("CUSTOM_TASK::").split("|", 2)
+        cwd = root / examples / directory
+        kind = "custom"
+        argv = None
+        path = None
+    else:
+        path = Path(script)
+        if not path.is_absolute():
+            path = root / examples / path
+        cwd = path.parent
+        kind = "python" if path.suffix == ".py" else "shell"
+        argv = ["python" if kind == "python" else "bash", path.name]
+        command = None
+        display = script
+    rows.append({"id": f"task-{index:04d}", "kind": kind, "path": str(path.relative_to(root)) if path else None,
+                 "cwd": str(cwd.resolve()), "argv": argv, "shell_command": command, "display": display})
+plan = {"bench_tasks": len(rows), "counts": {kind: sum(row["kind"] == kind for row in rows) for kind in ["python", "shell", "custom"]},
+        "deferred_not_passed": int(deferred), "tasks": rows, "task_execution_started": False}
+text = json.dumps(plan, indent=2) + "\n"
+if output:
+    Path(output).write_text(text)
+else:
+    print(text, end="")
+PYCOLLECT
+    exit $?
+fi
+
+# Keep full task output beside the reviewed batch, including successful tasks.
+# A separate cache/tmp/extension root is owned by each task and retained for
+# diagnosis; none of these paths use or clear the caller's default cache.
+if [ -z "${TA_CI_ARTIFACT_DIR:-}" ]; then
+    mkdir -p "${PROJECT_ROOT}/tmp" || exit 1
+    TA_CI_ARTIFACT_DIR=$(mktemp -d "${PROJECT_ROOT}/tmp/ta-ci-bench.XXXXXXXX") || exit 1
+fi
+export TA_CI_ARTIFACT_DIR
+mkdir -p "$TA_CI_ARTIFACT_DIR" || exit 1
+mkdir "$TA_CI_ARTIFACT_DIR/tasks" || { echo "Refusing reused task artifacts: $TA_CI_ARTIFACT_DIR" >&2; exit 1; }
+echo "Full task artifacts: $TA_CI_ARTIFACT_DIR"
+PYTEST_XML_ARGS=(--junitxml="${TA_CI_ARTIFACT_DIR}/testing.xml")
 
 # Run the migrated operator tests when coverage is being collected.
 # The workflow runs them after this script, so there is nothing to do on the
@@ -409,7 +515,7 @@ if [ "$ENABLE_COVERAGE" = true ] || [ "$ENABLE_CPP_COVERAGE" = true ]; then
         : > operator_output.log
         for operator_test_path in "${OPERATOR_TESTS[@]}"; do
             export COVERAGE_FILE="${PROJECT_ROOT}/coverage_data/.coverage_operator_$(echo "$operator_test_path" | sed 's/[\/\.]/_/g')"
-            pytest "$operator_test_path" -v \
+            pytest "${PYTEST_CI_ARGS[@]}" "$operator_test_path" -v \
                 --cov=tilelang --cov-config="${PROJECT_ROOT}/.coveragerc" --cov-report= \
                 "${OPERATOR_MARKER_ARGS[@]}" 2>&1 | tee -a operator_output.log
             operator_batch_code=${PIPESTATUS[0]}
@@ -445,58 +551,69 @@ temp_dir=$(mktemp -d) # 创建临时目录仅用于存放结果标记文件，�
 for script in "${all_scripts[@]}"; do
     total_scripts=$((total_scripts + 1))
 
-    # 启动后台子进程
+    # The collector, command, parallelism and success predicate remain TA's.
     {
-        # 判断是否为自定义任务
+        task_log_dir=$(printf '%s/tasks/task-%04d' "$TA_CI_ARTIFACT_DIR" "$total_scripts")
+        mkdir "$task_log_dir" || exit 1
+        export TILELANG_CACHE_DIR="$task_log_dir/cache"
+        export TORCH_EXTENSIONS_DIR="$task_log_dir/torch"
+        export TMPDIR="$task_log_dir/tmp"
+        mkdir -p "$TILELANG_CACHE_DIR" "$TORCH_EXTENSIONS_DIR" "$TMPDIR" || exit 1
+        started_ns=$(date +%s%N)
         if [[ "$script" == CUSTOM_TASK::* ]]; then
-            # 提取任务信息（去掉前缀后按 | 分割: 目录|命令|显示名称）
             task_info=${script#CUSTOM_TASK::}
             task_dir=$(echo "$task_info" | cut -d'|' -f1)
             task_cmd=$(echo "$task_info" | cut -d'|' -f2)
             display_name=$(echo "$task_info" | cut -d'|' -f3)
-
-            # 在指定目录下执行指定命令
-            output=$(cd "$task_dir" && eval "$task_cmd" 2>&1)
+            (cd "$task_dir" && eval "$task_cmd") >"$task_log_dir/stdout.log" 2>"$task_log_dir/stderr.log"
             exit_code=$?
             current_script_ref="$display_name"
         else
-            # 原有普通脚本执行逻辑
             script_dir=$(dirname "$script")
             script_name=$(basename "$script")
             current_script_ref="$script"
-
-            # 执行脚本并捕获输出到变量，不在磁盘生成日志文件
             if [[ "$script" == *.py ]]; then
                 if [ "$ENABLE_COVERAGE" = true ]; then
-                    # 使用 coverage run 统计 examples 执行的 Python 代码覆盖率
-                    # 每个脚本使用独立的 coverage 文件名，避免并行冲突
                     safe_name=$(echo "$script" | sed 's/[\/\.]/_/g')
-                    output=$(cd "$script_dir" && COVERAGE_FILE="${PROJECT_ROOT}/coverage_data/.coverage_${safe_name}" coverage run --rcfile="${PROJECT_ROOT}/.coveragerc" "$script_name" 2>&1)
+                    (cd "$script_dir" && COVERAGE_FILE="${PROJECT_ROOT}/coverage_data/.coverage_${safe_name}" coverage run --rcfile="${PROJECT_ROOT}/.coveragerc" "$script_name") >"$task_log_dir/stdout.log" 2>"$task_log_dir/stderr.log"
                     exit_code=$?
                 else
-                    output=$(cd "$script_dir" && python "$script_name" 2>&1)
+                    (cd "$script_dir" && python "$script_name") >"$task_log_dir/stdout.log" 2>"$task_log_dir/stderr.log"
                     exit_code=$?
                 fi
             else
-                output=$(cd "$script_dir" && bash "$script_name" 2>&1)
+                (cd "$script_dir" && bash "$script_name") >"$task_log_dir/stdout.log" 2>"$task_log_dir/stderr.log"
                 exit_code=$?
             fi
         fi
-
-        # 结果判定逻辑
-        # 1. 进程必须正常退出
-        # 2. 任务还必须匹配 KERNEL OUTPUT MATCH 或 TEST PASSED!
+        finished_ns=$(date +%s%N)
+        output=$(cat "$task_log_dir/stdout.log" "$task_log_dir/stderr.log")
         last_line=$(echo "$output" | tail -n 1)
+        task_passed=false
         if (( exit_code == 0 )) && {
             [[ "$output" =~ [Kk][Ee][Rr][Nn][Ee][Ll][[:space:]][Oo][Uu][Tt][Pp][Uu][Tt][[:space:]][Mm][Aa][Tt][Cc][Hh] ]] ||
             [[ "$output" =~ [Tt][Ee][Ss][Tt][[:space:]][Pp][Aa][Ss][Ss][Ee][Dd][!] ]]
         }; then
+            task_passed=true
+        fi
+        if ! python - "$task_log_dir" "$script" "$current_script_ref" "$exit_code" "$task_passed" "$started_ns" "$finished_ns" <<'PYRECORD'
+import json
+from pathlib import Path
+import sys
+
+folder, entry, display, code, passed, started, finished = sys.argv[1:]
+record = {"queue_entry": entry, "display": display, "execution_exit_code": int(code), "original_predicate_passed": passed == "true",
+          "started_ns": int(started), "finished_ns": int(finished), "stdout": "stdout.log", "stderr": "stderr.log"}
+Path(folder, "result.json").write_text(json.dumps(record, indent=2) + "\n")
+PYRECORD
+        then
+            echo "[FAILED] $current_script_ref (cannot retain task observation)" >&2
+        elif [ "$task_passed" = true ]; then
             echo "[PASSED] $current_script_ref"
             touch "$temp_dir/pass_$total_scripts"
         else
             echo "[FAILED] $current_script_ref (Exit: $exit_code)"
             echo "  Last line: $last_line"
-            # 失败时打印最后5行方便调试
             echo "$output" | tail -n 5 | sed 's/^/  /'
         fi
     } &
@@ -517,6 +634,15 @@ bench_exit_code=0
 if (( failed_scripts > 0 )); then
     bench_exit_code=1
 fi
+
+python - "$TA_CI_ARTIFACT_DIR" "$total_scripts" "$passed_scripts" "$failed_scripts" "$bench_exit_code" <<'PYSUMMARY'
+import json
+from pathlib import Path
+import sys
+
+folder, total, passed, failed, code = sys.argv[1:]
+Path(folder, "bench_result.json").write_text(json.dumps({"total": int(total), "passed": int(passed), "failed": int(failed), "bench_exit_code": int(code)}, indent=2) + "\n")
+PYSUMMARY
 
 echo -e "\n====================================="
 echo "Execution Summary"
@@ -555,15 +681,16 @@ if [ "$ENABLE_COVERAGE" = true ]; then
     # C++ coverage 时不使用 --forked，避免多进程并发写入 .gcda 文件冲突
     COV_ARGS="--cov=tilelang --cov-report=term --cov-report=json:${PROJECT_ROOT}/coverage_data/pytest_coverage.json --cov-config=${PROJECT_ROOT}/.coveragerc"
     if [ "$ENABLE_CPP_COVERAGE" = true ]; then
-        pytest "${PROJECT_ROOT}/testing/python/" -v $COV_ARGS "${PYTEST_MARKER_ARGS[@]}" 2>&1 | tee pytest_output.log
+        pytest "${PYTEST_CI_ARGS[@]}" "${PYTEST_XML_ARGS[@]}" "${PYTEST_TARGETS[@]}" -v $COV_ARGS "${PYTEST_MARKER_ARGS[@]}" 2>&1 | tee pytest_output.log
     else
-        pytest --forked "${PROJECT_ROOT}/testing/python/" -v -n $MAX_JOBS $COV_ARGS "${PYTEST_MARKER_ARGS[@]}" 2>&1 | tee pytest_output.log
+        pytest --forked "${PYTEST_CI_ARGS[@]}" "${PYTEST_XML_ARGS[@]}" "${PYTEST_TARGETS[@]}" -v -n $MAX_JOBS $COV_ARGS "${PYTEST_MARKER_ARGS[@]}" 2>&1 | tee pytest_output.log
     fi
     unset COVERAGE_FILE
 else
-    pytest --forked "${PROJECT_ROOT}/testing/python/" -v -n $MAX_JOBS "${PYTEST_MARKER_ARGS[@]}" 2>&1 | tee pytest_output.log
+    pytest --forked "${PYTEST_CI_ARGS[@]}" "${PYTEST_XML_ARGS[@]}" "${PYTEST_TARGETS[@]}" -v -n $MAX_JOBS "${PYTEST_MARKER_ARGS[@]}" 2>&1 | tee pytest_output.log
 fi
 pytest_exit_code=${PIPESTATUS[0]}
+cp pytest_output.log "${TA_CI_ARTIFACT_DIR}/testing_merged.log" || exit 1
 
 # 提取 pytest 统计（最后一行包含 passed/failed/xfailed）
 pytest_summary=$(grep -E "[0-9]+ (passed|failed|xfailed)" pytest_output.log | tail -1)
@@ -578,12 +705,12 @@ if [ -n "$pytest_summary" ]; then
     if echo "$pytest_summary" | grep -q "passed"; then
         pytest_passed=$(echo "$pytest_summary" | grep -Eo "[0-9]+ passed" | grep -Eo "[0-9]+" || echo "0")
     fi
-    
+
     # 提取 failed 数量（不含 xfailed）
     if echo "$pytest_summary" | grep -q "failed"; then
         pytest_failed=$(echo "$pytest_summary" | grep -Eo "[0-9]+ failed" | grep -Eo "[0-9]+" || echo "0")
     fi
-    
+
     # 提取 xfailed 数量（预期失败，不计入失败）
     if echo "$pytest_summary" | grep -q "xfailed"; then
         pytest_xfailed=$(echo "$pytest_summary" | grep -Eo "[0-9]+ xfailed" | grep -Eo "[0-9]+" || echo "0")
@@ -606,13 +733,13 @@ if [ "$ENABLE_COVERAGE" = true ] || [ "$ENABLE_CPP_COVERAGE" = true ]; then
     echo -e "\n====================================="
     echo "Collecting Coverage Data"
     echo "====================================="
-    
+
     mkdir -p "${PROJECT_ROOT}/coverage_data" "${PROJECT_ROOT}/coverage_reports"
-    
+
     # Python coverage
     if [ "$ENABLE_COVERAGE" = true ]; then
         echo "Collecting Python coverage..."
-        
+
         # Combine all coverage files in coverage_data (examples + pytest already write here)
         coverage_files=$(find "${PROJECT_ROOT}/coverage_data" -name ".coverage*" -type f)
         if [ -n "$coverage_files" ]; then
@@ -621,23 +748,23 @@ if [ "$ENABLE_COVERAGE" = true ] || [ "$ENABLE_CPP_COVERAGE" = true ]; then
             coverage combine --keep $coverage_files 2>&1 || true
             coverage json -o "${PROJECT_ROOT}/coverage_data/coverage.json" --include=tilelang/* 2>&1 || true
             unset COVERAGE_FILE
-            cd "${PROJECT_ROOT}/examples"
+            cd "${PROJECT_ROOT}/${EXAMPLES_REL}"
             echo "✓ Python coverage collected"
         fi
     fi
-    
+
     # C++ coverage
     if [ "$ENABLE_CPP_COVERAGE" = true ]; then
         echo "Collecting C++ coverage..."
         # Only collect from tilelang_objs.dir (contains only tilelang-ascend/src)
         # This is faster and avoids timeout issues with collecting entire build directory
         lcov --capture --directory "${PROJECT_ROOT}/build/CMakeFiles/tilelang_objs.dir" --output-file "${PROJECT_ROOT}/coverage_data/coverage.info" --no-checksum --ignore-errors source,graph 2>&1 || true
-        
+
         if [ -f "${PROJECT_ROOT}/coverage_data/coverage.info" ]; then
             echo "✓ C++ coverage collected (tilelang-ascend/src only)"
         fi
     fi
-    
+
     # Generate report
     if [ -f "${PROJECT_ROOT}/scripts/generate_coverage_stats_report.py" ]; then
         python "${PROJECT_ROOT}/scripts/generate_coverage_stats_report.py"
@@ -657,6 +784,7 @@ failed_all=$((failed_scripts + pytest_failed))
 
 echo -e "\n====================================="
 echo "Final Execution Summary (Bench + Pytest)"
+echo "Scope deferred: $scope_deferred_count (not counted as passed)"
 echo "Bench: Total: $total_scripts | Passed: $passed_scripts | Failed: $failed_scripts"
 echo "Pytest: Passed: $pytest_passed | Failed: $pytest_failed | Xfailed: $pytest_xfailed (expected failures, counted as passed)"
 echo "Total: $total_all | Passed: $passed_all | Failed: $failed_all"

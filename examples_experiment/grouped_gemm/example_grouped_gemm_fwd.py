@@ -1,7 +1,9 @@
+"""Complete original experimental source; runtime requires explicit main()."""
+
 import torch
 import argparse
 import tilelang
-import tilelang.language as T
+import tilelang.ascend.a2a3.language as T
 
 
 def torch_gmm(a, b, block_metadata, trans_b=False):
@@ -82,7 +84,7 @@ def grouped_gemm(batch_sizes_list, K, N, block_M, block_N, block_K, dtype="float
             with T.Scope("C"):
                 loop_k = T.ceildiv(K, block_K)
                 for k in T.serial(loop_k):
-                    # Copyin
+                    # Copy in
                     T.copy(
                         A[m_start : m_start + block_M, k * block_K : (k + 1) * block_K],
                         A_L1,
@@ -197,7 +199,9 @@ def test_grouped_gemm():
     run_tilelang_grouped_gemm([63, 77, 111, 280], 8192, 8192, 64, 64, 64, False)
 
 
-if __name__ == "__main__":
+def main():
+    import torch_npu  # noqa: F401
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch_sizes", type=str, default="64, 128", help="comma-separated batch sizes")
     parser.add_argument("--K", type=int, default=8192, help="reduce dim")
@@ -222,4 +226,6 @@ if __name__ == "__main__":
         trans_b,
     )
 
-    # test_grouped_gemm()
+
+if __name__ == "__main__":
+    main()

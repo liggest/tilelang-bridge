@@ -1,3 +1,5 @@
+> TA 0deb8b93 来源算法参考：本页行号、旧IR与注册代码是原版本资料，不能作为当前可编译模板。现行接口以本地pipeline/native源码、main IR技能和pass-generate/references/integration-points.md为准。
+
 # ascend_lower_parallel_to_vector.cc 设计文档
 
 ## 1. 背景与目标
@@ -132,11 +134,11 @@ private:
     const VarNode *vector_dim_var_ = nullptr;    // 内层向量化维度变量
     const VarNode *outer_dim_var_ = nullptr;     // 外层维度变量（2D向量化）
     bool is_2d_vectorizing_ = false;             // 是否启用2D向量化
-    
+
     // 临时Buffer管理
     int temp_buffer_id_ = 0;                     // Buffer命名计数器
     std::vector<Buffer> temp_buffers_;           // 当前Block的临时Buffer列表
-    
+
     // 维度信息
     int64_t vector_dim_extent_{0};               // 向量化维度范围
     int64_t outer_dim_extent_{0};                // 外层维度范围
@@ -223,12 +225,12 @@ struct BroadcastInfo {
         // Case 1: parallel → (store | seq)
         if body is BufferStore or SeqStmt:
             尝试向量化 → TryVectorizeStoreSeq()
-        
+
         // Case 2: parallel → parallel → (store | seq) [2D向量化]
         if inner_for->kind == kParallel:
             if third_for exists: ERROR "不支持3D及以上"
             尝试2D向量化 → TryVectorizeStoreSeq(is_2d=True)
-    
+
     if op->kind == kSerial:
         // Case 3: serial → parallel → (store | seq)
         if inner_for->kind == kParallel:
@@ -250,7 +252,7 @@ struct BroadcastInfo {
             plan.inner_vec_len = element_count
             plan.outer_extent = 1
             plan.is_2d_vectorizable = false
-    
+
     // 2D Case
     if output_buffer->shape.size() == 2:
         if indices[1] contains vector_dim_var:
@@ -258,7 +260,7 @@ struct BroadcastInfo {
             plan.inner_vec_len = inner_vec_len
             plan.outer_extent = element_count / inner_vec_len
             plan.is_2d_vectorizable = (outer_dim_var in indices[0])
-    
+
     // 3D Case (double buffer)
     if output_buffer->shape.size() == 3:
         类似2D处理，使用indices[1]和indices[2]
@@ -275,27 +277,27 @@ struct BroadcastInfo {
     // Case 1: L0C→GM (Cast + BufferLoad from L0C)
     if expr is Cast of L0C BufferLoad:
         生成 ascend_copy(L0C → GM)
-    
+
     // Case 2: 简单数据搬运 (BufferLoad)
     if expr is BufferLoad:
         生成 ascend_copy(input → output)
-    
+
     // Case 3: 一元操作
     if IsUnaryOp(expr):
         生成 GenerateUnaryVectorCall(op, out, in, count)
-    
+
     // Case 4: 二元操作
     if IsBinaryOp(expr):
         // Simple-Simple: 两边都是BufferLoad或Scalar
         if left_simple and right_simple:
             HandleSimpleCase() → 直接生成vector call
-        
+
         // Simple-Complex: 一边简单，一边复杂
         if left_simple and right_complex:
             CreateTempBuffer(rhs_tmp)
             DecomposeExpression(rhs → rhs_tmp)
             GenerateBinaryVectorCall(lhs, rhs_tmp → out)
-        
+
         // Complex-Complex: 两边都复杂
         if left_complex and right_complex:
             CreateTempBuffer(lhs_tmp, rhs_tmp)
@@ -316,14 +318,14 @@ struct BroadcastInfo {
        - 仅支持1D buffer
        - index必须是简单变量（无offset）
        - 判断广播维度
-    
+
     2. 创建广播Buffer → CreateBroadcastBuffer()
        - 形状: [outer_extent, inner_vec_len]
-    
+
     3. 创建工作空间Buffer → CreateBroadcastWorkspaceBuffer()
        - 类型: uint8
        - 大小: 2 * total_elements
-    
+
     4. 生成广播调用 → GenerateBroadcastStmt()
        - 调用 tl.ascend_broadcast()
        - 参数: dst, src_2d_view, workspace, dims, shapes
@@ -341,21 +343,21 @@ struct BroadcastInfo {
     if IsGlobalMemoryBuffer(output_buffer) and not is_l0c_input:
         // 创建临时UB Buffer存放计算结果
         temp_ub = CreateTempBufferLike(output, total_elements, inner_vec_len)
-        
+
         // 将计算写入临时UB
         DecomposeExpression(expr → temp_ub)
-        
+
         // 生成 UB→GM 复制
         GenerateAscendCopy(temp_ub → output_gm)
-    
+
     // Case 2: L0C→GM（矩阵计算输出）
     if expr is Cast of L0C BufferLoad:
         生成 ascend_copy(L0C → GM)
-    
+
     // Case 3: 简单数据搬运（纯BufferLoad表达式）
     if expr is BufferLoad:
         生成 ascend_copy(input_buffer → output_buffer)
-    
+
     // Case 4: UB/L1直接写入
     if output in UB/L1:
         直接写入目标Buffer（无需额外copy）

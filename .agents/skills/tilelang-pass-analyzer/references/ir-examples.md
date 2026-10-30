@@ -196,26 +196,26 @@ iteration_end[iter2]
 # 核心逻辑伪代码
 VisitStmt_(EvaluateNode op):
   1. current_accesses = AnalyzeStmtAccesses(op)   # 分析当前语句内存访问
-  
+
   2. for each access in current_accesses:
      a. if access.is_sliced:                      # 切片操作
           sync_requirements.add("PipeBarrier_ALL")
-     
+
      b. related_buffers = FindRelatedBuffers(access.buffer_name)  # 查地址重叠的buffer
-     
+
      c. for each buffer in related_buffers:
           if buffer in current_access_history_:   # 有历史访问
             latest = history[buffer]
             if HasDataDependency(latest, access): # 检测 WAW/RAW/WAR
               sync_type = GetRequiredSyncType(latest, access)
               sync_requirements.add(sync_type)
-  
+
   3. optimized_syncs = OptimizeSyncRequirements(sync_requirements)  # 合并冗余
-  
+
   4. InsertSynchronization(optimized_syncs)      # 插入同步语句
-  
+
   5. UpdateSyncStatesAfterSync(optimized_syncs)  # 更新同步状态
-  
+
   6. 返回 SeqStmt([sync_stmts..., op])           # 同步 + 原语句
 ```
 
@@ -258,25 +258,25 @@ For i in [0, N] {
 
 Phase 1: AscendMemoryPlanner (StmtExprVisitor)
   → 收集 buffer 信息
-  
+
   VisitStmt_(AllocateNode):
     1. 记录 buffer scope (shared.l1/wmma.matrix_a/wmma.matrix_b/wmma.accumulator)
     2. 计算 buffer size
     3. 记录到 buffer_sizes_[buf]
-  
+
   VisitStmt_(BufferStoreNode/BufferLoadNode/EvaluateNode):
     1. TrackBufferTouch(buf) - 记录 buffer 被访问
     2. 记录到 linear_seq_ 语句序列
     3. 记录 first_use_[buf] 首次使用位置
-  
+
 Phase 2: PlanMemory()
   → 生命周期分析 + 地址分配
-  
+
   LivenessAnalysis():
     1. 逆序遍历 linear_seq_，找出每个 buffer 的最后使用点 (KILL)
     2. 正序遍历，找出每个 buffer 的首次使用点 (GEN)
     3. 构建 event_map_[stmt] = {gen: [...], kill: [...]}
-  
+
   PlanMemoryForScope(scope, buffers):
     1. 为每个 buffer 构建生命区间 [start, end]
     2. 按开始时间排序
@@ -380,7 +380,7 @@ tilelang_root {
       Copy(L0C[i], workspace[i])
     }
   }
-  
+
   AttrStmt[resource_scope=1] {
     For i in [0, 64] {
       Copy(workspace[i], UB[i])
@@ -455,12 +455,12 @@ TIR-transforming pass。完整 selection geometry、`requires` / `ensures` 与 f
 
 Phase 1: CrossCoreDetector (StmtVisitor)
   → 检测跨核流水线循环
-  
+
   VisitStmt_(ForNode):
     if annotation["num_stages"] 存在:
       1. 创建 PipelineInfo
       2. 遍历 body 中的 EvaluateNode
-  
+
   VisitStmt_(EvaluateNode):
     1. 获取操作的 buffer scope
     2. checkBufferScope(var) → CUBE_SCOPE / VEC_SCOPE
@@ -469,7 +469,7 @@ Phase 1: CrossCoreDetector (StmtVisitor)
 
 Phase 2: LoopAnalyzer (StmtVisitor)
   → 分析循环内的 Cube/Vector 操作
-  
+
   VisitStmt_(EvaluateNode):
     1. 判断操作属于 Cube 还是 Vector
     2. 记录 workspace_writes_C (Cube 写入)
@@ -478,7 +478,7 @@ Phase 2: LoopAnalyzer (StmtVisitor)
 
 Phase 3: LoopRewriter (StmtMutator)
   → 重写循环为多 stage
-  
+
   Rewrite():
     1. 获取 num_stages, cross_interval
     2. 创建 outer_loop_var (stage 循环)
@@ -505,7 +505,7 @@ For i in [0, N] annotations={num_stages: 2} {
   Copy(global, L0A[i])
   CubeGemm(L0A, L0B, L0C)
   Copy(L0C, workspace[i])
-  
+
   # Stage 1: Vector (通过 GM workspace handoff)
   Copy(workspace[i], UB)
   VectorReLU(UB, UB)
@@ -517,14 +517,14 @@ For i in [0, N] annotations={num_stages: 2} {
 ```
 For stage in [0, N+num_stages] {
   # Stage 偏移执行，形成流水线
-  
+
   # Cube stage
   if stage < N:
     Copy(global, L0A[stage])
     CubeGemm(L0A, L0B, L0C[stage])
     Copy(L0C[stage], workspace[stage])
     set_cross_flag(Cube_done[stage % num_stages])
-  
+
   # Vector stage (延迟 1 个 stage)
   if stage >= 1 && stage < N+1:
     wait_cross_flag(Cube_done[(stage-1) % num_stages])
@@ -586,10 +586,10 @@ VectorAdd {                        ← Vector 核指令
 
 Phase 1: BufferUseCollector (StmtExprVisitor)
   → 收集 buffer 使用信息
-  
+
   BuildHandleAllocMapping():
     → 建立 handle → Allocate 映射
-  
+
   VisitExpr_(CallNode):
     1. 分析每个 call 的 buffer 参数
     2. if IsGEMMFunction(func_name):
@@ -601,7 +601,7 @@ Phase 1: BufferUseCollector (StmtExprVisitor)
 
 Phase 2: InferCorrectScopes()
   → 根据使用信息推断 scope
-  
+
   for each buffer:
     if original_scope == "local.fragment":
       if gemm_positions.count(0) > 0:
@@ -610,7 +610,7 @@ Phase 2: InferCorrectScopes()
         → corrected_scope = "wmma.matrix_b"   # L0B
       elif gemm_positions.count(2) > 0:
         → corrected_scope = "wmma.accumulator" # L0C
-    
+
     elif original_scope == "shared":
       if used_in_vector && !used_in_cube:
         → corrected_scope = "shared.ub"          # Vector 专用
@@ -619,16 +619,16 @@ Phase 2: InferCorrectScopes()
 
 Phase 3: ScopeCorrector (StmtExprMutator)
   → 应用 scope 修正
-  
+
   VisitStmt_(BlockNode):
     1. 遍历 alloc_buffers
     2. 替换 buffer.data 为新 scope 的 Var
     3. 更新 buffer_replacements_
-  
+
   VisitExpr_(VarNode):
     1. 查找 var_replacements_
     2. 返回修正后的 Var
-  
+
   InjectDefaultLayoutMap():
     1. 为 shared.l1 buffer 注入默认 zN Layout
     2. 避免用户未指定 layout 时后端无法计算地址
@@ -680,31 +680,31 @@ Allocate C[wmma.accumulator, float32] # L0C
 
 VisitStmt_(BlockRealizeNode):
   1. 检查 iter_values 为空（opaque block）
-  
+
   2. 处理 predicate:
      if !is_one(predicate):
        body = IfThenElse(predicate, body)
-  
+
   3. 处理 annotations:
      HandleAnnotations() → 提取 pragma 属性
-  
+
   4. 处理 alloc_buffers（逆序）:
      for each buffer in alloc_buffers:
        a. body = DeclBuffer(buffer, body)
        b. body = Allocate(buffer.data, shape, body)
        c. 注入 storage_align annotation
-  
+
   5. 插入 AttrStmt（pragma 转换）
-  
+
   6. 返回变换后的 body
 
 VisitStmt_(ForNode):
   1. 处理 unit loop（extent=1）:
      → 直接展开为 body
-  
+
   2. 处理 ThreadBinding:
      → 转换为 AttrStmt[thread_extent]
-  
+
   3. 处理普通循环:
      → 保留 For，处理 annotations
 
@@ -766,7 +766,7 @@ Allocate A[...] {
 
 Phase 1: AllocateCollector (StmtExprVisitor)
   → 收集 shared.l1 和 shared.ub 分配
-  
+
   VisitStmt_(AllocateNode):
     if IsDynamicSharedMemory(buffer_var):
       → dyn_shmem_allocs_[buf] = op
@@ -775,27 +775,27 @@ Phase 1: AllocateCollector (StmtExprVisitor)
 
 Phase 2: LinearAccessPatternFinder (StmtExprVisitor)
   → 构建线性访问序列，分析生命周期
-  
+
   VisitStmt_(AllocateNode):
     1. 记录 alloc_info_[buf]
     2. 记录 num_physical_dimensions
-  
+
   VisitStmt_(BufferStoreNode/BufferLoadNode):
     1. TrackBufferTouch(buf)
     2. 记录到 linear_seq_[stmt].touched
-  
+
   VisitStmt_(AttrStmtNode/ForNode/IfThenElseNode):
     → 创建 scope entry/exit 点
 
 Phase 3: StoragePlanRewriter (StmtExprMutator)
   → 应用存储优化计划
-  
+
   VisitStmt_(BufferStoreNode):
     → 重写 buffer 访问
-  
+
   VisitExpr_(BufferLoadNode):
     → 重写 buffer 访问
-  
+
   VisitExpr_(VarNode):
     → 替换为新的 buffer var
 ```
@@ -850,7 +850,7 @@ Buffer C[shared.ub, float16, [128, 256]]     ← 保持不变
 
 **核心类：** `LowerTileOpPass` (继承 `IRMutatorWithAnalyzer`) + `RemapBufferRewriter`
 
-**Tile 操作 Lower 实现：** `src/op/ascend.cc`
+**Tile 操作 Lower 实现：** `src/ascend/a2a3/op/ascend.cc`
 - `AscendCopy::Lower()` (行61-500+) - 将 T.copy 操作转换为具体的内存拷贝 API
 - 支持多种 scope 转换：GM↔L1、L1↔L0A/L0B、L0C↔GM、GM↔UB、UB↔GM
 - 根据 src/dst scope 自动选择对应的 C++ 函数模板（如 `copy_gm_to_l1`, `copy_l1_to_l0a` 等）
@@ -862,21 +862,21 @@ Buffer C[shared.ub, float16, [128, 256]]     ← 保持不变
 
 Phase 1: LowerTileOpPass (IRMutatorWithAnalyzer)
   → 解析并 Lower Tile 操作
-  
+
   VisitStmt_(BlockNode):
     1. 记录 buffer_map_ (buffer data → buffer)
     2. 读取 layout_map 注解
     3. for each (buffer, layout):
        buffer_remap_[buffer] = makeBufferWithLayout(buffer, layout)
     4. 更新 alloc_buffers
-  
+
   VisitStmt_(EvaluateNode):
     1. ParseOperator(stmt) → tile_op
     2. if tile_op != null:
          lowered = tile_op->Lower(LowerArgs{...})
          → 调用具体操作的 Lower 实现（如 AscendCopy::Lower）
     3. 返回 lowered stmt
-  
+
   VisitExpr_(BufferLoadNode/BufferStoreNode):
     if buffer in buffer_remap_:
       new_indices = layout_map_[buffer]->Forward(indices)
@@ -922,12 +922,12 @@ Block {
 
 **变换要点：**
 - ParseOperator 解析 Tile 操作（T.copy, T.gemm 等）
-- 调用具体操作的 Lower 方法生成底层调用（实现在 `src/op/ascend.cc`）
+- 调用具体操作的 Lower 方法生成底层调用（实现在 `src/ascend/a2a3/op/ascend.cc`）
 - 根据 layout_map 对 buffer 访问索引进行变换
 - local.fragment → local 转换
 
 **详细 Lower 实现：**
-`src/op/ascend.cc` 中的 `AscendCopy::Lower()` 方法负责：
+`src/ascend/a2a3/op/ascend.cc` 中的 `AscendCopy::Lower()` 方法负责：
 1. 根据 src/dst buffer 的 scope 判断拷贝类型（如 GM→L1、L1→L0A 等）
 2. 生成对应的 C++ 函数调用（如 `tl::ascend::copy_gm_to_l1<half, M, N>`）
 3. 处理 layout 变换，计算新的 buffer indices

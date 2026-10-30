@@ -96,13 +96,12 @@ Cube 和 Vector 核之间的流水并行：
 
 ```python
 for k in T.Pipelined(T.ceildiv(seq_len, block_N), num_stages=2):
-    T.copy(K[bz, by, k * block_N:(k + 1) * block_N, :], k_l1)
+    T.copy(K[bz, by, k * block_N : (k + 1) * block_N, :], k_l1)
     T.gemm_v0(q_l1, k_l1, acc_s_l0c, transpose_B=True, init=True)
     T.copy(acc_s_l0c, workspace_1[cid, :, :])
 
     T.tile.fill(acc_s_ub, 0.0)
-    T.copy(workspace_1[cid, vid * block_M // 2:vid * block_M // 2 + block_M // 2, :],
-           acc_s_ub_)
+    T.copy(workspace_1[cid, vid * block_M // 2 : vid * block_M // 2 + block_M // 2, :], acc_s_ub_)
     T.tile.add(acc_s_ub, acc_s_ub, acc_s_ub_)
     T.tile.mul(acc_s_ub, acc_s_ub, sm_scale)
     ...
@@ -136,8 +135,7 @@ with T.Kernel(m_num * n_num, is_npu=True) as (cid, _):
     B_L1 = T.alloc_shared((K_L1, block_N), dtype)
     C_L0 = T.alloc_fragment((block_M, block_N), accum_dtype)
 
-    for bx, by in T.Persistent([T.ceildiv(M, block_M), T.ceildiv(N, block_N)],
-                                core_num, cid):
+    for bx, by in T.Persistent([T.ceildiv(M, block_M), T.ceildiv(N, block_N)], core_num, cid):
         loop_k = T.ceildiv(K, K_L1)
         for k in T.serial(loop_k):
             T.copy(A[bx * block_M, k * K_L1], A_L1)
@@ -179,7 +177,7 @@ T.wait_flag("mte2", "v", 0)
 未使用的槽位也可能保留初始 token。
 
 event ID 的身份包含有向 `(src_pipe, dst_pipe)` pair；反向 pair 是独立编号空间。完整公开
-语义见 [Programming Guide](../../../../../docs/TileLang-Ascend%20Programming%20Guide.md)。
+语义见 [Programming Guide](../../../../../docs/ascend_a2a3/TileLang-Ascend%20Programming%20Guide.md)。
 本节 raw API 用于理解 public/generated/legacy code；编写新 Expert kernel 时，先读取当前
 `AGENTS.md` 并遵循其中的同步 authoring workflow。不得生成已删除的
 `T.init_flag` / `T.clear_flag`。
@@ -194,7 +192,7 @@ event ID 的身份包含有向 `(src_pipe, dst_pipe)` pair；反向 pair 是独�
 ```python
 # Vector 核完成后通知 Cube 核（从 UB → GM 的数据通路）
 T.copy(output_ub, workspace[...])  # UB → GM
-T.set_cross_flag("MTE3", 0)        # Vector 核使用 MTE3 通路
+T.set_cross_flag("MTE3", 0)  # Vector 核使用 MTE3 通路
 
 # Cube 核等待 Vector 核完成
 T.wait_cross_flag(0)
@@ -218,9 +216,9 @@ T.wait_cross_flag(0)
 用于标注代码块的执行域。
 
 ```python
-with T.Scope("C"):   # Cube 域
+with T.Scope("C"):  # Cube 域
     ...
-with T.Scope("V"):   # Vector 域
+with T.Scope("V"):  # Vector 域
     ...
 ```
 
@@ -250,8 +248,8 @@ T.printf("fmt %s %d\n", "string", cid)
 
 ```python
 T.printf("A_L1:\n")
-T.dump_tensor(A_L1, 111, 64)               # 不带 shape
-T.dump_tensor(A_L1, 111, 64, (8, 8))       # 带 shape_info 格式化输出
+T.dump_tensor(A_L1, 111, 64)  # 不带 shape
+T.dump_tensor(A_L1, 111, 64, (8, 8))  # 带 shape_info 格式化输出
 ```
 
 ### 查看生成的 AscendC 代码

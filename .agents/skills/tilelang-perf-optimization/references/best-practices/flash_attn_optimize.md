@@ -1,10 +1,10 @@
 # Flash Attention optimization on TileLang-Ascend
 
-This reference is a review checklist and a worked-example map. Its concrete
-buffer shapes and schedule values come from
-[`flash_attn_bhsd_expert_h16_d128.py`](../../../../../examples/flash_attention/fa_opt/flash_attn_bhsd_expert_h16_d128.py);
-they are not universal recommendations for another shape, dtype, target, or
-compiler revision.
+This reference preserves the TA optimization checklist. The original text named
+`flash_attn_bhsd_expert_h16_d128.py`, which is absent from the fixed source pin.
+Inspect the [actual pinned FA optimization family](https://github.com/tile-ai/tilelang-ascend/tree/0deb8b93da11b7f0becbcded732d9633b7ca4e34/examples/flash_attention/fa_opt)
+before reusing any shape or schedule value; the historical numbers are not a
+current kernel or target guarantee.
 
 ## Start with the actual bottleneck
 
@@ -42,7 +42,7 @@ or 24 active Cube cores is only an experiment seed.
 
 A reused physical region's ownership spans its producer, consumer, first and
 last accesses, and next reuse. The synchronization contract is in the
-[Programming Guide](../../../../../docs/TileLang-Ascend%20Programming%20Guide.md).
+[Programming Guide](../../../../../docs/ascend_a2a3/TileLang-Ascend%20Programming%20Guide.md).
 
 Flash Attention needs particular care at these boundaries:
 

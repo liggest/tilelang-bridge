@@ -3,11 +3,13 @@ name: tilelang-programming-model-guide
 description: TileLang Ascend Developer/Expert 模式选择与 pass_configs 配置指南。当需要确定编程模式、配置 pass_configs、或在两种模式之间转换时触发。API 详情请参考 tilelang-api-best-practices skill。
 ---
 
+> 适用范围：TA A2/A3 资产；主线 backend/build/IR/A5 技能保持独立。先读 docs/ascend_a2a3/migration.md，已有用户授权、模式与原配置优先；不重复请求同一批准，不因搬入本 skill 自动授权安装/外发/push/定时任务。
+
 # TileLang Ascend 编程模式与 pass_configs 指南
 
 
 本 skill 帮助 agent 选择配置、保留已有控制方式并检查模式转换。默认值、API 语义和限制以
-[公共语言参考](../../../../docs/language_ref/primitives.md#ascend-compilation-options-and-cv-scopes)
+[公共语言参考](../../../../docs/ascend_a2a3/language_ref/primitives.md#ascend-compilation-options-and-cv-scopes)
 为准；可运行写法从文末的仓库示例选取，不在 skill 中维护另一份 API 合同。
 
 ---
@@ -25,7 +27,9 @@ description: TileLang Ascend Developer/Expert 模式选择与 pass_configs 配�
 | **CV 交互** | 可将 workspace 与 vid 的处理交给编译器，见 §3.1.1 | 显式 GM `workspace` + 手动 `vid` 二分 |
 | **pass_configs** | 按 §2.2 配置同步与内存规划，沿用默认 C/V 划分 | 手写 scope 可沿用默认 C/V 划分；全手动时显式关闭 |
 | **适用场景** | 大多数算子，跨平台兼容 | 极致性能优化，需要底层控制 |
-| **示例目录** | `examples/developer_mode/` | `examples/flash_attention/fa_opt/flash_attn_bhsd_expert_*.py` |
+| **示例目录** | `examples/ascend_a2a3/developer_mode/` | `examples/ascend_a2a3/flash_attention/fa_opt/flash_attn_bhsd_expert_*.py` |
+
+以下示例路径表示固定 TA 来源的迁移目标，不保证当前都存在或已验证。先查 `maint/ascend_a2a3/ecosystem_ports.json`；缺目标时只读取固定 pin 的原 source，不能执行不存在的路径或据此宣称当前支持。
 
 **混合模式**：Developer 主体 + 少量 Ascend 专属 `T.tile.xxx`。仍使用 Developer 的
 pass_configs，由编译器生成 resource scope 和同步；不要因为用了 `T.tile.*` 就关闭 CombineCV。
@@ -34,7 +38,7 @@ pass_configs，由编译器生成 resource scope 和同步；不要因为用了 
 
 ## 2. pass_configs 详解（核心）
 
-配置默认值与 scope 兼容规则以 [公共语言参考](../../../../docs/language_ref/primitives.md#ascend-compilation-options-and-cv-scopes) 为准。
+配置默认值与 scope 兼容规则以 [公共语言参考](../../../../docs/ascend_a2a3/language_ref/primitives.md#ascend-compilation-options-and-cv-scopes) 为准。
 
 ### 2.1 先判断执行侧，再检查依赖
 
@@ -79,9 +83,9 @@ pass_configs = {
 
 检查生成代码时，确认 Cube/Vector 操作均位于对应 scope，纯 Vector kernel 也不例外。
 遇到 GM 标量写入、外部调用、原始代码或无明确执行侧的屏障，先按
-[公共 scope 规则](../../../../docs/language_ref/primitives.md#ascend-compilation-options-and-cv-scopes)
+[公共 scope 规则](../../../../docs/ascend_a2a3/language_ref/primitives.md#ascend-compilation-options-and-cv-scopes)
 检查显式归属要求；不要用自动划分代替 GM 标量写入的显式归属，也不能关闭验证绕过。
-若需要诊断自动划分，参见 [编译器的执行侧分析](../../../../docs/ascend/compiler_managed_vector_mask.md#resource-scope-contract)；
+若需要诊断自动划分，参见 [编译器的执行侧分析](../../../../docs/ascend_a2a3/ascend/compiler_managed_vector_mask.md#resource-scope-contract)；
 不要在其他 pass 中重复推导执行核。
 
 ### 2.4 Vector mask reuse 安全开关
@@ -95,7 +99,7 @@ pass_configs[tilelang.PassConfigKey.TL_ASCEND_VECTOR_MASK_REUSE] = False
 
 若关闭后结果恢复，保留两种配置的生成代码与输入，继续定位状态传递问题；不要据此认定
 dtype、布局或同步都已正确。适用平台和开关语义见
-[mask 复用与保守配置](../../../../docs/ascend/compiler_managed_vector_mask.md#scope-and-safe-fallback)。
+[mask 复用与保守配置](../../../../docs/ascend_a2a3/ascend/compiler_managed_vector_mask.md#scope-and-safe-fallback)。
 
 ---
 
@@ -126,7 +130,7 @@ threads=2  ──►  vid 消除  ──►  workspace 消除
 3. **去 vid 偏移**：`v_block` 不再 `// 2`，循环恢复整程 `range(BI)`，删除全部 `vid * ...` 索引偏移。
 4. **合并源代码中的搬运**：将两次经 `workspace` 的搬运表达为一次片上 buffer 间的 `T.copy`；编译器可生成 GM 中转，不能将这种写法解释为硬件片上直连。
 
-> 采用此改造时，先对照 `examples/developer_mode/sparse_flash_attn_developer_vid_reduce.py`。
+> 采用此改造时，先对照 `examples/ascend_a2a3/developer_mode/sparse_flash_attn_developer_vid_reduce.py`。
 > [mode-examples.md §6](references/mode-examples.md#6-cv-融合--推荐写法消除-workspace--vidthreads2) 辅助解释映射；完整代码以仓库可执行示例为准。
 
 
@@ -153,12 +157,12 @@ threads=2  ──►  vid 消除  ──►  workspace 消除
 
 | 模式 | 目录 | 说明 |
 |------|------|------|
-| Developer | `examples/developer_mode/` | GEMM、elementwise 等 |
-| Developer（编译器管理 workspace/vid） | `examples/developer_mode/sparse_flash_attn_developer_vid_reduce.py` 与 `sparse_flash_attn_developer.py` | 对照显式与编译器管理的写法 |
-| Expert | `examples/gemm/example_gemm_intrinsic.py`、`examples/flash_attention/fa_opt/flash_attn_bhsd_expert_*.py` | 极致性能优化 |
-| 混合（核间流水线） | `examples/flash_attention/flash_attn_bhsd_cc_sync.py`、`examples/flash_attention/fa_opt/flash_attn_bhsd_auto_pipeline_*.py` | FA 核间流水线 |
-| 纯 Vector | `examples/elementwise/`、`examples/softmax/` | 无 Cube 操作 |
-| CV 融合 | `examples/dequantize_gemm/`、`examples/quant_batch_matmul/` | Vector 计算 + Cube GEMM |
+| Developer | `examples/ascend_a2a3/developer_mode/` | GEMM、elementwise 等 |
+| Developer（编译器管理 workspace/vid） | `examples/ascend_a2a3/developer_mode/sparse_flash_attn_developer_vid_reduce.py` 与 `sparse_flash_attn_developer.py` | 对照显式与编译器管理的写法 |
+| Expert | `examples/ascend_a2a3/gemm/example_gemm_intrinsic.py`、`examples/ascend_a2a3/flash_attention/fa_opt/flash_attn_bhsd_expert_*.py` | 极致性能优化 |
+| 混合（核间流水线） | `examples/ascend_a2a3/flash_attention/flash_attn_bhsd_cc_sync.py`、`examples/ascend_a2a3/flash_attention/fa_opt/flash_attn_bhsd_auto_pipeline_*.py` | FA 核间流水线 |
+| 纯 Vector | `examples/ascend_a2a3/elementwise/`、`examples/ascend_a2a3/softmax/` | 无 Cube 操作 |
+| CV 融合 | `examples/ascend_a2a3/dequantize_gemm/`、`examples/ascend_a2a3/quant_batch_matmul/` | Vector 计算 + Cube GEMM |
 
 **完整代码对比**（Developer vs Expert）：
 - → [mode-examples.md](references/mode-examples.md)

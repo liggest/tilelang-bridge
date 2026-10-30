@@ -3,6 +3,8 @@ name: tilelang-skill-review
 description: "聚合 .agents/skill-journal/ 中算子开发反馈，生成 skill 改进建议表，开发者命令行勾选后应用到对应 SKILL.md。覆盖所有 .agents/skills/ 下的 skill，不限于 op-design / op-develop。触发：skill review、skill 评审、检查 skill 反馈、应用 skill 改动、tilelang skill 改进、skill 反馈。"
 ---
 
+> 适用范围：TA A2/A3 资产；主线 backend/build/IR/A5 技能保持独立。先读 docs/ascend_a2a3/migration.md，已有用户授权、模式与原配置优先；不重复请求同一批准，不因搬入本 skill 自动授权安装/外发/push/定时任务。
+
 # Skill Review — TileLang-Ascend Skill 改进评审
 
 聚合算子开发过程中产生的反馈，生成可勾选的改进建议表，让开发者控制哪些落到 SKILL.md。

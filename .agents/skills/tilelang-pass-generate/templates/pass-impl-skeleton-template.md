@@ -1,266 +1,68 @@
-# {Pass 名称} 实现骨架文档（pass-impl-skeleton.md）
+# {PassName} 实现骨架
 
-> 本文件是「**代码层面的最后一次结构化对齐**」。比 `pass-design.md` 更落地，但比真实代码更轻量。
-> 在用户确认本骨架前，**禁止生成任何 .cc / .py 代码**。
->
-> 本骨架覆盖四个基础接入点及设计证明必需的 catalog / public header / OperationConfig。
-> UT/ST 测试不在本骨架范围内，由后续独立 skill 处理。
+这是设计模板，花括号表示需填入的设计事实，不能当可编译C++直接执行。用户已授权按明确设计实现时直接落实；范围变更才提供差异，不反复请求同一骨架批准。
 
----
+## 0. 任务与来源
 
-## 0. 任务摘要
+填写任务类型、设计来源、完整原组件/来源pin、目标平台和方言、行为支持域、上游producer与下游consumer、原有效/非法输入边界。不能把改注册表或一个代表用例当完整迁移。
 
-- **任务类型**：{新增 / 修改 / 重构}
-- **设计文档**：{pass-design.md 路径}
-- **Pass 名称**：{PassName}
-- **阶段归属**：{Phase 1: LowerAndLegalize / Phase 2: OptimizeForTarget}
-- **Pipeline 位置**：{在 PassA 后、PassB 前}
-- **平台范围**：{平台无关 / Ascend 特定}
+## 1. 文件清单
 
----
+| 文件 | 责任 |
+|---|---|
+| src/ascend/a2a3/transform/{pass_name}.cc | 本地完整算法与native factory |
+| src/ascend/a2a3/CMakeLists.txt | USE_ASCEND gated来源TU |
+| tilelang/ascend/a2a3/transform/__init__.py | require_native wrapper |
+| tilelang/ascend/a2a3/pipeline.py | 原序列中的真实插入点/条件 |
+| tilelang/transform/pass_config.py | 只有新增公共enum时改唯一owner |
+| tilelang/ascend/a2a3/pass_config.py | 仅本地归一化/default所需更改 |
+| testing/ascend_a2a3/python/refactor/.../test_a2a3_*.py | 真实新行为与失败边界；原算子资产仍在testing/ascend_a2a3 |
 
-## 1. 改动文件清单
+## 2. IR算法与数据合同
 
-| 序号 | 文件 | 状态 | 说明 |
-|------|------|------|------|
-| 1 | `src/transform/{pass_name}.cc` | {新建 / 修改} | C++ 主实现 |
-| 2 | `tilelang/transform/__init__.py` | 修改 | Python 封装 |
-| 3 | `tilelang/transform/pass_config.py` | {修改 / 不动} | 配置键定义（可选） |
-| 4 | `tilelang/engine/phase.py` | 修改 | Pipeline 接入 |
-| 5 | （按设计）catalog / public header / `OperationConfig` | {修改 / 不动} | Supporting contract |
+类的父类、每个visitor override、helper、identity map/set、analyzer与COW修改位置逐项说明；函数传值/const handle/裸Node参数遵主线tvm-ir技能，不凭旧nullptr或Var()猜空状态。
 
-> 测试文件（`testing/python/...`）**不在本骨架范围内**，由 Pass 测试生成 skill 处理。
+列出输入attrs的类型/来源/缺失策略，输出attrs的消费者，结构事实的读取/产生/失效，所有原Loop/Buffer/scope分支和临时buffer声明位置。TIRX使用SBlock、Bind、AllocBuffer，不能把旧LetStmt/Allocate机械改名而忽略词法范围或声明。
 
----
+## 3. Pass factory与隔离注册
 
-## 2. C++ 类骨架（仅签名，不写实现体）
-
-### 2.1 主类
+参考现有src/ascend/a2a3/transform/ascend_host.cc和ascend_collect_buffer_shape.cc的真实factory。占位形态：
 
 ```cpp
-namespace tvm {
-namespace tl {
-
-class {PassName} : public {父类: arith::IRMutatorWithAnalyzer / StmtExprVisitor / StmtExprMutator} {
-public:
-  // Pass 入口
-  static PrimFunc Substitute(PrimFunc f, PassContext ctx);
-
-private:
-  // 构造函数
-  {PassName}(PrimFunc f, PassContext ctx, {输入 attrs 参数});
-
-  // 成员变量
-  {Map<Var, Array<PrimExpr>>} input_attr_;       // 来自 {上游 Pass}
-  {Map<Buffer, PrimExpr>}     output_attr_;      // 供给 {下游 Pass}
-  // ... 其他状态
-
-  // 重写的 Visit 方法（仅列签名）
-  Stmt VisitStmt_(const ForNode* op) final;
-  Stmt VisitStmt_(const BufferStoreNode* op) final;
-  Expr VisitExpr_(const BufferLoadNode* op) final;
-  // ... 仅列将要重写的节点类型
-
-  // 辅助方法
-  bool IsTargetPattern(const {NodeType}* op) const;
-  Stmt RewriteStmt(const {NodeType}* op);
-};
-
-}  // namespace tl
-}  // namespace tvm
-```
-
-### 2.2 辅助类（如有，按 CrossCorePipeline 模式拆分）
-
-```cpp
-class {PassName}Detector : public StmtExprVisitor { ... };
-class {PassName}Analyzer { ... };
-class {PassName}Rewriter : public IRMutatorWithAnalyzer { ... };
-```
-
-> 仅当设计文档 §4.1 明确表示需要多类协作时才拆分；否则保持单类。
-
----
-
-## 3. Substitute 入口流程（伪代码，逐行）
-
-```
-PrimFunc Substitute(PrimFunc f, PassContext ctx):
-  1. 读取配置（若有配置键）
-     bool enabled = ctx->GetConfig<Bool>(k{PassName}Config, Bool({默认值})).value();
-     if (!enabled) return f;
-
-  2. 读取上游 attrs
-     auto attr = f->GetAttr<{Type}>("{key}");
-     if (!attr.defined()) {
-       // 缺失策略：{报错 / 跳过 / 默认值}
-     }
-
-  3. 构造变换器实例
-     {PassName} mutator(f, ctx, attr.value());
-
-  4. 执行变换
-     PrimFunc new_f = mutator.MutateFunc(f);          # IRMutatorWithAnalyzer
-     // 或 mutator.VisitStmt(f->body);                # StmtExprVisitor
-
-  5. 设置输出 attrs（如有）
-     new_f = new_f.WithAttrs({{"{out_key}", mutator.GetOutput()}});
-
-  6. 返回
-     return new_f;
-```
-
----
-
-## 4. Attr 与结构事实表
-
-### 4.1 输入 attrs
-
-| 键名 | 类型 | 来源 Pass | 缺失策略 |
-|------|------|-----------|----------|
-| `{key1}` | `Map<Var, Array<PrimExpr>>` | `{产生 Pass}` | {报错 / 跳过 / 默认值} |
-| `{key2}` | `Map<Buffer, PrimExpr>`     | `{产生 Pass}` | {报错 / 跳过 / 默认值} |
-
-### 4.2 输出 attrs
-
-| 键名 | 类型 | 下游消费 Pass |
-|------|------|----------------|
-| `{out_key1}` | `{Type}` | `{消费 Pass}` |
-
-### 4.3 结构事实
-
-| Fact | Consumed / produced / invalidated | 来源与消费者 |
-|------|-----------------------------------|--------------|
-| `{buffer access / resource_scope / lowered call / selected ABI}` | `{...}` | `{PassA -> 本 Pass -> PassB}` |
-
----
-
-## 5. 注册与配置键
-
-### 5.1 Pass 注册
-
-```cpp
+namespace tvm::tl::a2a3 {
 tvm::transform::Pass {PassName}() {
-  auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
-    return {PassName}::Substitute(std::move(f), ctx);
+  auto pass_func = [](tirx::PrimFunc f, IRModule mod,
+                      tvm::transform::PassContext ctx) {
+    // 完整实现读取配置/attrs，保原算法与必要IR适配。
+    return {PassName}Impl::Substitute(std::move(f), ctx);
   };
-  return CreatePrimFuncPass(pass_func, 0, "tl.{PassName}", {});
+  return tirx::transform::CreatePrimFuncPass(pass_func, 0,
+                                            "tl.A2A3{PassName}", {});
 }
-
-TVM_REGISTER_GLOBAL("tl.transform.{PassName}").set_body_typed({PassName});
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tl.transform.A2A3{PassName}", {PassName});
+}
+}  // namespace tvm::tl::a2a3
 ```
 
-### 5.2 配置键（可选）
+具体名字以已登记FFI为准，不能对现有名字盲加两次前缀。配置只注册一次；默认值须证明来自真实GetConfig和target defaults，不据backend名字推false。
 
-```cpp
-static constexpr const char *k{PassName}Config = "tl.{pass_name_lower}";
-TVM_REGISTER_PASS_CONFIG_OPTION(k{PassName}Config, Bool);
-```
-
-> 默认值必须从 C++ `GetConfig`、target defaults 和设计语义确认；不要推断为 `Bool(false)`。
-
----
-
-## 6. Python 封装函数签名
+## 4. Python与pipeline
 
 ```python
-# tilelang/transform/__init__.py
+from .._native import require_native
 
-def {PassName}({可选参数: target=None / is_npu=False}):
-    """{一句话说明}。
-
-    {补充说明：上下游依赖、典型使用场景}
-
-    Returns
-    -------
-    fpass : tvm.transform.Pass
-        The result pass.
-    """
-    return _ffi_api.{PassName}({可选参数})
+def {PassName}():
+    return require_native("tl.transform.A2A3{PassName}", "{PassName}")()
 ```
 
----
+不另建全局_ffi_api覆盖A5。带参函数保真实参数，不凭模板改为None或删平台参数。Pipeline使用本地ascend_transform；model表示A2/A3，keys决定AscendC/PTO。列出插入处完整上下文及必须保持的顺序/条件，AscendC MaskLegalize后不可再rewrite。
 
-## 7. Pipeline 接入点（具体到上下文）
+## 5. 验证与报告
 
-### 7.1 接入位置
-
-**目标函数**：`{LowerAndLegalize / OptimizeForTarget}`，文件 `tilelang/engine/phase.py`
-
-**插入位置**：在 `{上游 Pass 行}` 之后、`{下游 Pass 行}` 之前
-
-### 7.2 接入 diff（伪 diff）
-
-```python
-    mod = tilelang.transform.{上游 Pass}()(mod)
-+   # ===== 新增 Pass =====
-+   mod = tilelang.transform.{PassName}()(mod)
-+   # =====
-    mod = tilelang.transform.{下游 Pass}()(mod)
-```
-
-### 7.3 配置键索引（如有）
-
-```python
-# tilelang/transform/pass_config.py
-
-class PassConfigKey(str, Enum):
-    TL_{PASS_NAME_UPPER} = "tl.{pass_name_lower}"
-    """Enable/disable {PassName}. Default: {verified_default}."""
-```
-
----
-
-## 8. 最小冒烟验证步骤（生成代码后立即跑，不依赖 UT/ST）
-
-按顺序执行，遇到第一个失败就停下来定位：
-
-1. **命名与导入冒烟**：
-   ```bash
-   python -c "import tilelang; from tilelang.transform import {PassName}; print({PassName}())"
-   ```
-2. **C++ 重建**（修改编入 shared library 的 C++ 时必跑）：{仓库构建脚本}
-3. **跨文件命名一致性 grep**：
-   ```bash
-   grep -n "{PassName}" src/transform/{pass_name}.cc tilelang/transform/__init__.py tilelang/engine/phase.py
-   grep -n "tl.{pass_name_lower}" src/transform/{pass_name}.cc tilelang/transform/pass_config.py
-   ```
-4. **现有聚焦编译/行为回归**（必须经过新行为，不新建测试）：
-   ```bash
-   python {仓库已有的最小 example，例如 examples/elementwise/...}
-   ```
-
----
-
-## 9. 风险与待确认项
-
-### 9.1 已知风险
-
-- {风险 1：例如 attr 类型与上游 Pass 是否完全一致}
-- {风险 2：例如 Pipeline 顺序是否与现有 Pass 冲突}
-
-### 9.2 待用户确认
-
-- {项 1：是否需要新增配置键，默认值是否合理}
-- {项 2：Pipeline 位置是否需要进一步收敛}
-
----
-
-## 10. 测试待补（交棒标记）
-
-> 本骨架文档**不展开测试细节**。
->
-> 设计文档 §5 已经列出测试方案（功能/依赖/边界），由后续独立的 Pass 测试生成 skill 负责落地。
-> 实现代码生成完成后，请使用 Pass 测试生成 skill 接续这部分工作。
-
----
-
-## 11. 用户确认提示
-
-请用户确认以下三件事后，才进入代码生成阶段：
-
-1. ☐ 上述 C++ 类骨架（父类、Visit 方法、辅助类）符合预期
-2. ☐ Pipeline 接入位置（具体到上下游 Pass）符合预期
-3. ☐ Python 封装函数签名（参数、命名）符合预期
-
-确认后回复「确认骨架」或指出需要调整的具体条目。
+- 原源码同输入IR/source对照，归一化只能消除已证明的表示差异；原非法输出的新诊断单列。
+- 新native实际编译并确认装载路径；注册查询只证明名字，不证明算法。
+- 聚焦行为/失败边界，包含状态/nullable/COW/launch marker等本改动真正触及的合同。
+- 只有设备执行可写数值/性能通过；host/source/compile-only各自记录范围。
+- 报告完整改动、来源pin、必要适配、真实命令/退出码及未完成项，不把待补清单算通过。

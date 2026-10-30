@@ -1,7 +1,9 @@
 ---
 name: tilelang-op-develop
-description: "基于设计文档生成 TileLang-Ascend 算子实现代码与测试。从 design.md 中提取关键信息，结合 examples/ 中的参考实现生成可运行代码。触发：实现算子、写 kernel、生成代码、算子编码、根据设计文档实现。"
+description: "基于设计文档生成 TileLang-Ascend 算子实现代码与测试。从 design.md 中提取关键信息，结合 examples/ascend_a2a3/ 中的参考实现生成可运行代码。触发：实现算子、写 kernel、生成代码、算子编码、根据设计文档实现。"
 ---
+
+> 适用范围：TA A2/A3 资产；主线 backend/build/IR/A5 技能保持独立。先读 docs/ascend_a2a3/migration.md，已有用户授权、模式与原配置优先；不重复请求同一批准，不因搬入本 skill 自动授权安装/外发/push/定时任务。
 
 # TileLang-Ascend 算子代码生成
 
@@ -40,7 +42,7 @@ design.md 可能很长，**只提取以下字段，忽略其余内容**：
 
 ## 2. 参考来源（优先级高于 design.md 伪代码）
 
-**当 design.md 伪代码与 examples/ 中同类实现有冲突时，以 examples/ 为准。**
+**当 design.md 伪代码与 examples/ascend_a2a3/ 中同类实现有冲突时，以 examples/ascend_a2a3/ 为准。**
 
 ### 2.1 API 用法和模式选择
 
@@ -49,17 +51,19 @@ design.md 可能很长，**只提取以下字段，忽略其余内容**：
 
 ### 2.2 同类算子示例
 
-生成代码前，必须查阅 `examples/` 中的同类算子：
+生成代码前，查阅已迁 `examples/ascend_a2a3/` 同类算子。以下示例路径表示固定 TA 来源的迁移目标，不保证当前都存在或已验证。先查 `maint/ascend_a2a3/ecosystem_ports.json`；缺目标时只读取固定 pin 的原 source，不能执行不存在的路径或据此宣称当前支持。
+
+下表是来源类别/目标位置索引：
 
 | 算子类型 | 参考示例 |
 |---------|---------|
-| 逐元素运算（add/mul/sigmoid/relu） | `examples/elementwise/`、`examples/activation/` |
-| 归约运算（reduce_sum/max/min） | `examples/reduce/` |
-| 归一化（softmax/layernorm/rmsnorm） | `examples/softmax/`、`examples/normalization/` |
-| GEMM | `examples/gemm/`、`examples/developer_mode/gemm_developer.py` |
-| 融合算子 | `examples/flash_attention/`、`examples/pipeline/`、`examples/developer_mode/matmul_add_developer.py` |
-| Developer 模式 | `examples/developer_mode/` |
-| transpose / layout transform | `examples/transpose/transpose.py`（提取结构谓词、
+| 逐元素运算（add/mul/sigmoid/relu） | `examples/ascend_a2a3/elementwise/`、`examples/ascend_a2a3/activation/` |
+| 归约运算（reduce_sum/max/min） | `examples/ascend_a2a3/reduce/` |
+| 归一化（softmax/layernorm/rmsnorm） | `examples/ascend_a2a3/softmax/`、`examples/ascend_a2a3/normalization/` |
+| GEMM | `examples/ascend_a2a3/gemm/`、`examples/ascend_a2a3/developer_mode/gemm_developer.py` |
+| 融合算子 | `examples/ascend_a2a3/flash_attention/`、`examples/ascend_a2a3/pipeline/`、`examples/ascend_a2a3/developer_mode/matmul_add_developer.py` |
+| Developer 模式 | `examples/ascend_a2a3/developer_mode/` |
+| transpose / layout transform | `examples/ascend_a2a3/transpose/transpose.py`（提取结构谓词、
 连续 suffix-record 聚合搬运和通用 fallback；不得照抄具体 perm/shape 分支） |
 
 查阅示例时关注：
@@ -86,7 +90,7 @@ design.md 可能很长，**只提取以下字段，忽略其余内容**：
 
 ### 步骤 2：查找参考示例
 
-在 `examples/` 中找到最相似的算子实现，**完整阅读其代码并记录技术决策**：
+在 `examples/ascend_a2a3/` 中找到最相似的算子实现，**完整阅读其代码并记录技术决策**：
 
 **必须记录的技术决策**（从参考实现中提取）：
 
@@ -149,7 +153,7 @@ GM 标量访问、逐元素 div/mod、active cores、每核串行任务和最大
 本 skill 负责 L0 精度收敛，同时负责实现的最低性能可行性。先跑 L0：
 
 ```bash
-python examples/{op}/test_{op}.py --level l0
+python examples/ascend_a2a3/{op}/test_{op}.py --level l0
 ```
 
 随后必须运行 design.md 中的性能可行性哨兵（即使它被标为 large/L1），为每个 case

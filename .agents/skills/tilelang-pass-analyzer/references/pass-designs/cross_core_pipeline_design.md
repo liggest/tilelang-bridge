@@ -1,3 +1,5 @@
+> TA 0deb8b93 来源算法参考：本页行号、旧IR与注册代码是原版本资料，不能作为当前可编译模板。现行接口以本地pipeline/native源码、main IR技能和pass-generate/references/integration-points.md为准。
+
 ## 1. 背景与目标
 
 * 需求来源： 昇腾 NPU 采用异构多核架构，包含 **Cube 核**（负责矩阵计算，如 GEMM）和 **Vector 核**（负责tile计算，如 Add/Mul/Exp）。用户通过 `T.Pipelined(loop_num, num_stages)` 标注循环，当同一循环内同时包含 Cube 和 Vector 操作时，需要构建跨核流水线，使双核异步并行执行，隐藏计算延迟、提升硬件利用率。

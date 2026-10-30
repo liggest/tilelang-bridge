@@ -3,6 +3,8 @@ name: tilelang-api-best-practices
 description: TileLang Ascend API 使用最佳实践。提供内存分配、数据搬运、矩阵计算、归约、元素级运算、同步、调度原语等 API 的正确用法和最佳实践。触发：使用 TileLang API 编写 Ascend NPU kernel 时或遇到 API 相关问题时。
 ---
 
+> 适用范围：TA A2/A3 资产；主线 backend/build/IR/A5 技能保持独立。先读 docs/ascend_a2a3/migration.md，已有用户授权、模式与原配置优先；不重复请求同一批准，不因搬入本 skill 自动授权安装/外发/push/定时任务。
+
 # TileLang Ascend API 最佳实践
 
 ---
@@ -41,8 +43,8 @@ description: TileLang Ascend API 使用最佳实践。提供内存分配、数�
 
 1. 先按场景读取一份 reference；不要一次加载全部文档。
 2. Reference 中链接的 `docs/` 是公开契约，API 签名和支持范围以该文档及当前源码为准。
-3. 写 kernel 前检查最接近的 `examples/`；文档未覆盖时再查
-   `tilelang/language/ascend.py`、`ascend_tile.py` 和 `testing/python/language/`。
-4. 不从旧代码或 PR 描述推断当前接口，也不使用 legacy `tilelang/language/pto.py`。
+3. 写 kernel 前检查最接近的 `examples/ascend_a2a3/`；文档未覆盖时再查
+   `tilelang/ascend/a2a3/language/ascend.py`、`ascend_tile.py` 和 `testing/ascend_a2a3/python/language/`。
+4. 不从旧代码或 PR 描述推断当前接口，也不使用 legacy `tilelang/ascend/a2a3/language/pto.py`。
 5. 更新本 skill 时只增加会改变 Agent 决策的规则；API 手册内容应在 canonical docs 中维护，
    这里通过链接引用，不复制第二份。

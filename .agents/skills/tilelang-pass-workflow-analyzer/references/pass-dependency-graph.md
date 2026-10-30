@@ -125,7 +125,7 @@ Before placing a pass, answer all of these:
 
 | Need | Read |
 | --- | --- |
-| exact pass sequence | `pass-pipeline-overview.md` and then `tilelang/engine/phase.py` |
+| exact pass sequence | `pass-pipeline-overview.md` and then `tilelang/ascend/a2a3/pipeline.py` |
 | placement decision | `new-pass-placement-guide.md` |
 | pass registration/signature | `../../tilelang-pass-analyzer/references/pass-registry-ascend.md` |
 | C/V classifier internals | `../../tilelang-pass-analyzer/references/pass-designs/design_ascend_combinecv.md` |

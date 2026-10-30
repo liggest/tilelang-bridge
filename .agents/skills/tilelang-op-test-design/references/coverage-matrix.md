@@ -62,7 +62,7 @@ checker 对每个适用维度判定：`PASS`（实际数量 ≥ 最小数量）/
 4. 不在强制集、且类别表标了可豁免的维度 → 默认 N/A
 ```
 
-> **proto.yaml 来源**：由 Stage 1（analyst / `tilelang-op-design`）从 DESIGN.md **§9.3 精度表**（dtype 全集）+ §4/§1（attr/shape）派生并写入 `examples/{op}/proto.yaml`——**每个算子都产出**，故覆盖门禁始终有权威的 dtype/attr 来源（`D-DTYPE-*` / `D-PARAM-*` 恒可强制）。缺 proto 时 checker 优雅降级（仅按文件内 tags 校验，可能漏检缺失 dtype）。
+> **proto.yaml 来源**：由 Stage 1（analyst / `tilelang-op-design`）从 DESIGN.md **§9.3 精度表**（dtype 全集）+ §4/§1（attr/shape）派生并写入 `examples/ascend_a2a3/{op}/proto.yaml`——**每个算子都产出**，故覆盖门禁始终有权威的 dtype/attr 来源（`D-DTYPE-*` / `D-PARAM-*` 恒可强制）。缺 proto 时 checker 优雅降级（仅按文件内 tags 校验，可能漏检缺失 dtype）。
 
 ---
 
@@ -75,11 +75,11 @@ checker 对每个适用维度判定：`PASS`（实际数量 ≥ 最小数量）/
 def gen_l1_shapes(bM, bN):
     k = 4  # 倍数，按规模需要调整
     return {
-        "D-SHAPE-ALIGNED":  (bM * k,            bN * k),            # block 整除
-        "D-SHAPE-TAIL-1":   (bM * k + 1,        bN * k),            # 余数 1
-        "D-SHAPE-TAIL-MID": (bM * k + bM // 2,  bN * k + bN // 2),  # 中间余数
-        "D-SHAPE-PRIME":    (nearest_prime(bM*k), nearest_prime(bN*k)),  # 完全非对齐
-        "D-SHAPE-EDGE":     (1, bN * k),                            # 退化（另配 (bM*k, 1) / 单元素）
+        "D-SHAPE-ALIGNED": (bM * k, bN * k),  # block 整除
+        "D-SHAPE-TAIL-1": (bM * k + 1, bN * k),  # 余数 1
+        "D-SHAPE-TAIL-MID": (bM * k + bM // 2, bN * k + bN // 2),  # 中间余数
+        "D-SHAPE-PRIME": (nearest_prime(bM * k), nearest_prime(bN * k)),  # 完全非对齐
+        "D-SHAPE-EDGE": (1, bN * k),  # 退化（另配 (bM*k, 1) / 单元素）
     }
 ```
 
@@ -99,9 +99,9 @@ def gen_l1_shapes(bM, bN):
 ```python
 L1_CASES = [
     # (shape,            dtype,      block,    tags)
-    ((512, 512),        "float16",  (128,128), ["D-DTYPE-fp16","D-SHAPE-ALIGNED","D-VALRANGE-S"]),
-    ((513, 512),        "float16",  (128,128), ["D-SHAPE-TAIL-1"]),
-    ((509, 503),        "bfloat16", (128,128), ["D-DTYPE-bf16","D-SHAPE-PRIME"]),
+    ((512, 512), "float16", (128, 128), ["D-DTYPE-fp16", "D-SHAPE-ALIGNED", "D-VALRANGE-S"]),
+    ((513, 512), "float16", (128, 128), ["D-SHAPE-TAIL-1"]),
+    ((509, 503), "bfloat16", (128, 128), ["D-DTYPE-bf16", "D-SHAPE-PRIME"]),
     # ...
 ]
 ```
@@ -109,13 +109,25 @@ L1_CASES = [
 **形式 B：文件末尾汇总 manifest**
 ```python
 COVERAGE_MANIFEST = {
-    "D-DTYPE-fp16": 6, "D-DTYPE-fp32": 4, "D-DTYPE-bf16": 4,
-    "D-SHAPE-ALIGNED": 3, "D-SHAPE-TAIL-1": 1, "D-SHAPE-TAIL-MID": 1,
-    "D-SHAPE-PRIME": 2, "D-SHAPE-EDGE": 1,
-    "D-VALRANGE-S": 2, "D-VALRANGE-M": 1, "D-VALRANGE-L": 1, "D-VALRANGE-ASYM": 1,
+    "D-DTYPE-fp16": 6,
+    "D-DTYPE-fp32": 4,
+    "D-DTYPE-bf16": 4,
+    "D-SHAPE-ALIGNED": 3,
+    "D-SHAPE-TAIL-1": 1,
+    "D-SHAPE-TAIL-MID": 1,
+    "D-SHAPE-PRIME": 2,
+    "D-SHAPE-EDGE": 1,
+    "D-VALRANGE-S": 2,
+    "D-VALRANGE-M": 1,
+    "D-VALRANGE-L": 1,
+    "D-VALRANGE-ASYM": 1,
     "D-PARAM-dim": 2,
-    "D-SPECIAL-INF": 1, "D-SPECIAL-NAN": 1, "D-SPECIAL-ZERO": 1, "D-SPECIAL-DBOUND": 1,
-    "D-EXC-DTYPE": 1, "D-EXC-SHAPE": 1,
+    "D-SPECIAL-INF": 1,
+    "D-SPECIAL-NAN": 1,
+    "D-SPECIAL-ZERO": 1,
+    "D-SPECIAL-DBOUND": 1,
+    "D-EXC-DTYPE": 1,
+    "D-EXC-SHAPE": 1,
 }
 ```
 

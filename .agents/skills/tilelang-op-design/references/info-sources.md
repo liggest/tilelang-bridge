@@ -16,22 +16,22 @@
 
 ```bash
 # 1. 搜索同类算子（根据算子名称）
-glob examples/**/*{算子名称}*.py
-glob examples/**/*{算子类别}*.py  # 如 gemm, softmax, reduce
+glob examples/ascend_a2a3/**/*{算子名称}*.py
+glob examples/ascend_a2a3/**/*{算子类别}*.py  # 如 gemm, softmax, reduce
 
 # 2. 如果找到同类实现，完整阅读
-read examples/{找到的同类实现路径}
+read examples/ascend_a2a3/{找到的同类实现路径}
 
 # 3. 检查关键技术点
-grep "T.Kernel" examples/{同类实现}     # Kernel 维度
-grep "T.gemm\|T.gemm_v0" examples/{同类实现}  # GEMM API
-grep "T.alloc" examples/{同类实现}      # 内存分配方式
-grep "T.Scope\|T.barrier" examples/{同类实现}  # 同步方式
+grep "T.Kernel" examples/ascend_a2a3/{同类实现}     # Kernel 维度
+grep "T.gemm\|T.gemm_v0" examples/ascend_a2a3/{同类实现}  # GEMM API
+grep "T.alloc" examples/ascend_a2a3/{同类实现}      # 内存分配方式
+grep "T.Scope\|T.barrier" examples/ascend_a2a3/{同类实现}  # 同步方式
 ```
 
 ## 2. 信息收集步骤
 
-1. 查阅 `examples/` 中同类算子实现（**强制步骤 0**）
+1. 查阅 `examples/ascend_a2a3/` 中同类算子实现（**强制步骤 0**）
 2. 查阅 `.agents/skills/tilelang-custom-skill/tilelang-api-best-practices/SKILL.md` 确认 API 可用性和用法
 3. 查阅 `.agents/skills/tilelang-custom-skill/tilelang-programming-model-guide/SKILL.md` 确认编程模式和 pass_configs 配置
 4. 如有参考实现，分析其计算步骤（**仅用于理解数学逻辑，不可直接使用 API**）
@@ -46,14 +46,14 @@ grep "T.Scope\|T.barrier" examples/{同类实现}  # 同步方式
 
 | 优先级 | 信息源 | 用途 | 说明 |
 |--------|--------|------|------|
-| **0** | **本项目 `examples/` 同类实现** | **主要参考：API、编程模式、Kernel 结构** | **最权威**，直接可用 |
-| 1 | `docs/TileLang-Ascend Programming Guide.md` | API 完整说明 | 补充细节 |
+| **0** | **本项目 `examples/ascend_a2a3/` 同类实现** | **主要参考：API、编程模式、Kernel 结构** | 以 ports 清单及实际验证为准；待迁 source 不直接执行 |
+| 1 | `docs/ascend_a2a3/TileLang-Ascend Programming Guide.md` | API 完整说明 | 补充细节 |
 | 2 | `.agents/skills/tilelang-custom-skill/tilelang-api-best-practices/SKILL.md` | API 速查 | 快速确认 |
-| 3 | `testing/python/language/` | 边界用法和测试模式参考 | 测试参考 |
+| 3 | `testing/ascend_a2a3/python/language/` | 边界用法和测试模式参考 | 测试参考 |
 | 4 | **外部参考实现** | **仅用于理解数学逻辑** | **不可直接使用 API** |
 | 5 | `.agents/skills/tilelang-custom-skill/tilelang-programming-model-guide/SKILL.md` | 模式选择 | 辅助决策 |
-| 6| `tilelang/language/__init__.py` + `tilelang/language/*.py` | 公开 API 导出关系与前端定义 | API 定义 |
-| 7 | `src/op/` + `src/target/` | lowering 与后端实现状态 | 实现验证 |
+| 6| `tilelang/ascend/a2a3/language/__init__.py` + `tilelang/ascend/a2a3/language/*.py` | 公开 API 导出关系与前端定义 | API 定义 |
+| 7 | `src/ascend/a2a3/op/` + `src/ascend/a2a3/codegen/` | lowering 与后端实现状态 | 实现验证 |
 
 
-**规则**：当信息源之间矛盾时，以 `examples/` 为准。若 `examples/` 未覆盖，以 `docs/` 为准。若 `docs/` 未覆盖，以 `tilelang/language/` 源码实际实现为准。
+**规则**：当信息源之间矛盾时，以 `examples/ascend_a2a3/` 为准。若 `examples/ascend_a2a3/` 未覆盖，以 `docs/` 为准。若 `docs/` 未覆盖，以 `tilelang/ascend/a2a3/language/` 源码实际实现为准。

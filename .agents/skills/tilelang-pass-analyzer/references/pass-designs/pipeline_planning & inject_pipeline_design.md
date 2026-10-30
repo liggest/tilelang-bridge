@@ -1,6 +1,8 @@
+> TA 0deb8b93 来源算法参考：本页行号、旧IR与注册代码是原版本资料，不能作为当前可编译模板。现行接口以本地pipeline/native源码、main IR技能和pass-generate/references/integration-points.md为准。
+
 ## 1. 背景与目标
 
-* 需求来源： 在NPU的Cube核或Vector核内部，存在数据搬运（CopyIn/CopyOut）和计算（GEMM/ElementWise）两种操作。用户通过 `T.Pipelined(loop_num, num_stages)` 标注循环，编译器需自动将搬运和计算排成软件流水线，使同一核内的搬运和计算能够 overlap 执行，隐藏访存延迟。
+* 需求来源： 在NPU的Cube核或Vector核内部，存在数据搬运（copy-in/CopyOut）和计算（GEMM/ElementWise）两种操作。用户通过 `T.Pipelined(loop_num, num_stages)` 标注循环，编译器需自动将搬运和计算排成软件流水线，使同一核内的搬运和计算能够 overlap 执行，隐藏访存延迟。
 * 业务价值： 核内串行执行时，搬运和计算无法重叠，核利用率低。流水线化后，上一片数据的计算与下一片数据的搬运并行执行，显著提升算子吞吐率。适用于所有存在"搬运→计算→搬运→计算"重复模式的算子（如分片GEMM、FlashAttention的KV循环等）。
 * 技术目标： 自动分析循环体内各操作的读写依赖，规划 pipeline stage 和 order，生成 prologue / body / epilogue 三段式流水线结构，并正确管理 buffer 多版本。
 
@@ -9,10 +11,10 @@
 ```python
 # 核内 pipeline 示例
 for k_i in T.Pipelined(initra_core_proc_num, num_stages=3):
-    T.copy(Q[m_i, :], q_l1[k_i * LEN:(k_i+1)*LEN])   # Stage 0: CopyIn
-    T.copy(K[k_i * LEN:(k_i+1)*LEN, :], k_l1)         # Stage 0: CopyIn
-    T.gemm(q_l1, k_l1, l0c)                            # Stage 1: Compute
-T.copy(l0c, C)                                          # Stage 2: CopyOut
+    T.copy(Q[m_i, :], q_l1[k_i * LEN : (k_i + 1) * LEN])  # Stage 0: copy-in
+    T.copy(K[k_i * LEN : (k_i + 1) * LEN, :], k_l1)  # Stage 0: copy-in
+    T.gemm(q_l1, k_l1, l0c)  # Stage 1: Compute
+T.copy(l0c, C)  # Stage 2: CopyOut
 ```
 
 ---
@@ -28,13 +30,13 @@ T.copy(l0c, C)                                          # Stage 2: CopyOut
 
 ```python
 def OptimizeForTarget(mod: IRModule, target: Target) -> IRModule:
-    mod = tilelang.transform.PipelinePlanning()(mod)            # 核内pipeline规划
-    mod = tilelang.transform.InjectSoftwarePipeline()(mod)      # 核内流水排布注入
+    mod = tilelang.transform.PipelinePlanning()(mod)  # 核内pipeline规划
+    mod = tilelang.transform.InjectSoftwarePipeline()(mod)  # 核内流水排布注入
 ```
 
 ### 2.2 流水掩盖原理
 
-假设核内切片5份，存在两步操作：CopyIn(A) → Compute(B)
+假设核内切片5份，存在两步操作：copy-in(A) → Compute(B)
 
 **串行执行：**
 
@@ -45,8 +47,8 @@ def OptimizeForTarget(mod: IRModule, target: Target) -> IRModule:
 **流水排布（num_stages=3, prefetch模式）：**
 ![alt text](image-2.png)
 
-- **prefetch 阶段**：包括 num_stages-1 个 CopyIn 动作（A0 A1 A2），驱动流水线
-- **main body 阶段**：Compute 和 CopyIn 交替执行（B0 A3, B1 A4, ...），实现 overlap
+- **prefetch 阶段**：包括 num_stages-1 个 copy-in 动作（A0 A1 A2），驱动流水线
+- **main body 阶段**：Compute 和 copy-in 交替执行（B0 A3, B1 A4, ...），实现 overlap
 - **epilogue 阶段**：仅执行剩余 Compute 动作（B2 B3 B4）
 
 ### 2.3 架构图
@@ -89,7 +91,7 @@ graph LR
 struct PipelineAnnotation {
   int stage;   // 流水阶段偏移（0 = 第一个stage，与prologue/epilogue计算相关）
   int order;   // 执行顺序（在流水线中的实际排列位置）
-  bool async;  // 是否为异步操作（CopyIn到shared buffer标记为async）
+  bool async;  // 是否为异步操作（copy-in到shared buffer标记为async）
 };
 ```
 
@@ -251,8 +253,8 @@ struct RewrittenBlockInfo {
 
 ```
 输入: pipeline_stage_infos = [
-  {idx:0, copy:true,  last_use:2, reads:[GM], writes:[L1_A]},  // CopyIn A
-  {idx:1, copy:true,  last_use:3, reads:[GM], writes:[L1_B]},  // CopyIn B
+  {idx:0, copy:true,  last_use:2, reads:[GM], writes:[L1_A]},  // copy-in A
+  {idx:1, copy:true,  last_use:3, reads:[GM], writes:[L1_B]},  // copy-in B
   {idx:2, copy:false, reads:[L1_A,L1_B], writes:[L0C]},        // GEMM
   {idx:3, copy:false, reads:[L0C], writes:[UB]},               // CopyOut
   {idx:4, copy:false, reads:[UB], writes:[GM]},                // WriteBack
@@ -291,7 +293,7 @@ num_stages = 2
     → need_multi_version = true, num_versions = 3
 
   扩展: L1_A[M,N] → L1_A[3,M,N]
-  访问重写: 
+  访问重写:
     Store: indices.insert(0, floormod(loop_var - min, 3))
     Load:  indices.insert(0, floormod(loop_var - min, 3))
 ```
@@ -300,7 +302,7 @@ num_stages = 2
 
 ```
 原始循环: for i in range(N) @stages=[0,1] @orders=[0,1]
-  block_A (stage=0): CopyIn
+  block_A (stage=0): copy-in
   block_B (stage=1): Compute
 
 max_stage = 1
@@ -326,11 +328,11 @@ epilogue (unroll): for i in [N, N+1)
 # 一个 commit group 内的最后一个操作会被标记为 commit
 
 async_states: {
-  stage_0: {
-    commit_groups: [[order_0], [order_2]],   # 两组独立的async操作
-    dst_buffers: {L1_A, L1_B},
-    producer_head: symbolic_index
-  }
+    stage_0: {
+        commit_groups: [[order_0], [order_2]],  # 两组独立的async操作
+        dst_buffers: {L1_A, L1_B},
+        producer_head: symbolic_index,
+    }
 }
 
 # async wait: 在消费者之前插入
@@ -368,14 +370,14 @@ with T.Scope("C"):
     loop_k = T.ceildiv(K, block_K)
     for k in T.Pipelined(loop_k, num_stages=3):
         T.barrier_all()
-        T.copy(A[bx * block_M, k * block_K], A_L1)   # CopyIn
-        T.copy(B[k * block_K, by * block_N], B_L1)   # CopyIn
+        T.copy(A[bx * block_M, k * block_K], A_L1)  # copy-in
+        T.copy(B[k * block_K, by * block_N], B_L1)  # copy-in
         if k == 0:
             T.gemm_v0(A_L1, B_L1, C_L0, init=True)  # Compute
         else:
-            T.gemm_v0(A_L1, B_L1, C_L0)              # Compute
+            T.gemm_v0(A_L1, B_L1, C_L0)  # Compute
         T.barrier_all()
-    T.copy(C_L0, C[bx * block_M, by * block_N])       # CopyOut
+    T.copy(C_L0, C[bx * block_M, by * block_N])  # CopyOut
 ```
 
 PipelinePlanning 为 copy 分配 stage=0，为 gemm 分配 stage=num_stages。InjectSoftwarePipeline 生成 prologue/body/epilogue，其中 body 阶段 copy 和 gemm 在不同 buffer 版本上并行。

@@ -3,8 +3,8 @@ name: tilelang-op-analyst
 description: "TileLang-Ascend 算子分析 Subagent。负责 Stage 1 算子设计（含需求理解与设计回退），调用 tilelang-op-design 生成 DESIGN.md，并调用 tilelang-op-test-design 生成 L0 门槛测试计划。"
 mode: subagent
 skills:
-  - tilelang-op-design
-  - tilelang-op-test-design
+- tilelang-op-design
+- tilelang-op-test-design
 ---
 
 # TileLang-Ascend 算子设计 Agent -- Stage 1 执行器
@@ -13,7 +13,7 @@ skills:
 
 ## 概述
 
-本 Agent 只处理一类产物：`DESIGN.md`。Stage 1 同时承担"需求理解"与"设计方案"两件事——由 `tilelang-op-design` skill 内部完成必需字段询问（算子名、公式、I/O 规格、编程模式偏好）、技术约束检测、同类 `examples/` 检索、以及完整设计文档生成。
+本 Agent 只处理一类产物：`DESIGN.md`。Stage 1 同时承担"需求理解"与"设计方案"两件事——由 `tilelang-op-design` skill 内部完成必需字段询问（算子名、公式、I/O 规格、编程模式偏好）、技术约束检测、同类 `examples/ascend_a2a3/` 检索、以及完整设计文档生成。
 
 此外，在 design 生成后必须调用 `tilelang-op-test-design`（场景 A，从 design.md）为算子生成 **L0 门槛测试计划**（具体规则 shape / dtype / golden 草案 / 按 dtype 的精度标准（混合容差）），追加写入 `DESIGN.md` 的验证方案章节，供 Stage 2 据此落地 L0 用例做精度收敛。**Stage 1 只生成 L0**；L1（功能，含不规则 shape）/ L2（异常）/ Boundary（特殊值）不在此生成，由 Stage 2 在 L0 通过后调 `tilelang-op-test-design`（场景 B）扩展。
 
@@ -38,7 +38,7 @@ skills:
    - 交付前必须执行本阶段规定的门禁校验。
    - 返回内容必须包含输出路径、验证结果和关键结论。
 
-5. **遵循项目根 [AGENTS.md](../../AGENTS.md) 的 6 项核心原则**
+5. **遵循项目根 [AGENTS.md](../../docs/ascend_a2a3/AGENTS.candidate.md) 的 6 项核心原则**
    - 特别是"不要凭记忆猜 API"、"从示例入手"、"遵循硬件内存层级"。
 
 ---
@@ -56,7 +56,7 @@ Orchestrator 在调度本 Agent 时会传入 `mode` 参数，决定本次行为�
 
 - **前置假设**：orchestrator 已在 Primary 上下文完成「需求完备性预检」并把 5 个必需字段（算子名 / 公式 / 输入规格 / 输出规格 / 编程模式）作为 `op_requirements` 结构传给你。你**不需要、也不应该**再问用户这 5 个字段。
 - 直接调用 `tilelang-op-design`，**把 `op_requirements` 完整传入 skill 上下文**——skill 看到字段已齐全后跳过提问环节，直接进入技术约束检测和 design 生成。
-- skill 完成技术约束检测、同类 examples/ 检索后产出 `DESIGN.md`。
+- skill 完成技术约束检测、同类 examples/ascend_a2a3/ 检索后产出 `DESIGN.md`。
 - **若 skill 检测出歧义需要更多信息**（如内存预算超限要重选 block size），不要自己在 Subagent 上下文 AskUserQuestion——返回 `partial_input` + 缺失项给 orchestrator，由 orchestrator 在 Primary 上下文继续问用户。
 
 ### `revision` 模式
@@ -78,11 +78,11 @@ Orchestrator 在调度本 Agent 时会传入 `mode` 参数，决定本次行为�
 | 类型 | 内容 | 需要读取的信息 |
 |------|------|---------------|
 | 必需输入（first_design）| `op_requirements` 结构（由 orchestrator 在 Primary 上下文预检后传入）| 算子名、公式、输入规格（shape + dtype + 动态轴）、输出规格、编程模式 |
-| 必需输入（revision）| `examples/{op}/history_version/design_rev{N}.md` | 旧 design 的设计选择 |
+| 必需输入（revision）| `examples/ascend_a2a3/{op}/history_version/design_rev{N}.md` | 旧 design 的设计选择 |
 | 必需输入（revision）| `design_error_summary` | 设计层错误的具体原因 |
 | 必需输入（revision）| `previous_revisions` | 历史回退备份路径列表 |
-| 输出文件 | `examples/{op}/DESIGN.md`（含 L0 门槛测试计划） | — |
-| 输出文件 | `examples/{op}/proto.yaml`（算子接口规格：dtype/attr） | dtype 全集取自 DESIGN.md §9.3 精度表、attr 取自 §4/§1 派生，供覆盖门禁 `coverage_check.py --proto` 派生应覆盖维度 |
+| 输出文件 | `examples/ascend_a2a3/{op}/DESIGN.md`（含 L0 门槛测试计划） | — |
+| 输出文件 | `examples/ascend_a2a3/{op}/proto.yaml`（算子接口规格：dtype/attr） | dtype 全集取自 DESIGN.md §9.3 精度表、attr 取自 §4/§1 派生，供覆盖门禁 `coverage_check.py --proto` 派生应覆盖维度 |
 | 使用 Skill | `tilelang-op-design` | 生成设计文档 + proto.yaml |
 | 使用 Skill | `tilelang-op-test-design`（场景 A） | 生成 L0 门槛测试计划，写入 DESIGN.md 验证方案章节 |
 
@@ -104,9 +104,9 @@ Orchestrator 在调度本 Agent 时会传入 `mode` 参数，决定本次行为�
 | 同步策略 | 与编程模式匹配（Developer 用自动同步、Expert 标明手动同步点） | 返回 fail + `missing_section: 同步` |
 | 验证方案 + L0 测试计划 | 含 golden 函数草案（PyTorch 参考实现）；并含由 `tilelang-op-test-design`（场景 A）生成的 **L0 门槛测试计划**：列出具体 L0 规则 shape（block 整除）、dtype、精度标准（按 dtype 的 atol/rtol/max_abs_error_limit/required_matched_ratio）。**只需 L0**，不要求 L1/L2/Boundary（由 Stage 2 在 L0 通过后扩展） | 返回 fail + `missing_section: 验证方案` 或 `missing_l0_plan` |
 | 精度标准 | DESIGN.md §9.3 精度标准表填了具体数值（非占位符 / TODO / 待补充），且 §4 声明的每个 dtype 都有对应精度行（浮点给 atol/rtol/max_abs_error_limit/required_matched_ratio，整型为 0/0/0/1.0） | 返回 fail + `missing_precision_standard` |
-| proto.yaml 存在 | `examples/{op}/proto.yaml` 存在且可解析：`operator.inputs[].dtype` 与 §9.3 精度表的 dtype 行一致（全集），`operator.attrs[].name` 覆盖所有关键属性。供覆盖门禁 `coverage_check.py --proto` 派生 D-DTYPE-*/D-PARAM-*，**每个算子都必须产出** | 返回 fail + `missing_proto` |
+| proto.yaml 存在 | `examples/ascend_a2a3/{op}/proto.yaml` 存在且可解析：`operator.inputs[].dtype` 与 §9.3 精度表的 dtype 行一致（全集），`operator.attrs[].name` 覆盖所有关键属性。供覆盖门禁 `coverage_check.py --proto` 派生 D-DTYPE-*/D-PARAM-*，**每个算子都必须产出** | 返回 fail + `missing_proto` |
 | 风险点 | 含技术约束检测结论（三维 Kernel、threads、动态边界、L0C 容量、GEMM 非整除等） | 返回 fail + `missing_section: 风险点` |
-| 同类实现引用 | 列出至少 1 个 `examples/` 中的具体参考文件路径 | 返回 fail + `missing_section: 同类实现` |
+| 同类实现引用 | 列出至少 1 个 `examples/ascend_a2a3/` 中的具体参考文件路径 | 返回 fail + `missing_section: 同类实现` |
 | 无占位符 | 不含 `{placeholder}`、`TODO`、`待补充`（已确认的除外） | 返回 fail + `placeholder_found` |
 | revision 模式专属 | 含"相对上一版的关键调整"和"为何不会再犯同一错误"的明确说明 | 返回 fail + `missing_section: 回退说明` |
 
@@ -131,8 +131,8 @@ Orchestrator 在调度本 Agent 时会传入 `mode` 参数，决定本次行为�
 
 - [ ] 接收 orchestrator 传入的 `op_requirements` 结构，**确认 5 个必需字段齐全**（若缺失，立即返回 fail + `input_missing` 让 orchestrator 重新预检；不要在 Subagent 上下文问用户）。
 - [ ] 调用 `tilelang-op-design`，**把 `op_requirements` 完整作为 skill 输入**——skill 看到字段已齐跳过提问。
-- [ ] skill 内部执行技术约束检测、同类 examples/ 检索。
-- [ ] skill 生成 `DESIGN.md` 并写入算子目录，**同时产出 `examples/{op}/proto.yaml`**（dtype 全集取自 §9.3 精度表、attr 取自 §4/§1，模板见 design-template.md §11.5）。
+- [ ] skill 内部执行技术约束检测、同类 examples/ascend_a2a3/ 检索。
+- [ ] skill 生成 `DESIGN.md` 并写入算子目录，**同时产出 `examples/ascend_a2a3/{op}/proto.yaml`**（dtype 全集取自 §9.3 精度表、attr 取自 §4/§1，模板见 design-template.md §11.5）。
 - [ ] 调用 `tilelang-op-test-design`（场景 A，从 design.md），**仅生成 L0 门槛测试计划**（规则 shape + dtype + golden 草案 + 精度标准），追加写入 `DESIGN.md` 验证方案章节。**不生成 L1/L2/Boundary。**
 - [ ] 执行门禁校验（含 L0 测试计划项、**proto.yaml 存在性**）。
 - [ ] 返回结构化摘要。
@@ -169,7 +169,7 @@ Orchestrator 在调度本 Agent 时会传入 `mode` 参数，决定本次行为�
 - stage: 1
 - mode: first_design / revision
 - operator: {op}
-- output: examples/{op}/DESIGN.md
+- output: examples/ascend_a2a3/{op}/DESIGN.md
 - revision_index: <数字，仅 revision 模式>
 - validation: pass / fail
 - validation_details:
@@ -188,7 +188,7 @@ Orchestrator 在调度本 Agent 时会传入 `mode` 参数，决定本次行为�
   - 回退说明: pass / fail / n/a
 - programming_mode: developer / expert / hybrid
 - key_api_choices: <主要 API 选型>
-- referenced_examples: <列出引用的 examples/ 路径>
+- referenced_examples: <列出引用的 examples/ascend_a2a3/ 路径>
 - l0_test_plan: <L0 规则 shape / dtype / 精度标准概要；由 tilelang-op-test-design 场景 A 生成>
 - key_adjustments: <仅 revision 模式：相对上一版的关键调整>
 - skills_consulted: <本次实际查阅 / 引用过的 skill 路径列表，相对 .agents/skills/；如 tilelang-op-design / tilelang-op-test-design / tilelang-custom-skill/tilelang-api-best-practices>

@@ -16,14 +16,15 @@
 
 ```python
 import tilelang
-import tilelang.language as T
+import tilelang.ascend.a2a3.language as T
 
 pass_configs = {
-    tilelang.PassConfigKey.TL_ASCEND_AUTO_CV_COMBINE: True,   # 自动CV分离
-    tilelang.PassConfigKey.TL_ASCEND_AUTO_SYNC: True,          # 自动同步
-    tilelang.PassConfigKey.TL_ASCEND_MEMORY_PLANNING: True,    # 自动内存规划
-    tilelang.PassConfigKey.TL_ASCEND_AUTO_CV_SYNC: True,       # 自动核间同步
+    tilelang.PassConfigKey.TL_ASCEND_AUTO_CV_COMBINE: True,  # 自动CV分离
+    tilelang.PassConfigKey.TL_ASCEND_AUTO_SYNC: True,  # 自动同步
+    tilelang.PassConfigKey.TL_ASCEND_MEMORY_PLANNING: True,  # 自动内存规划
+    tilelang.PassConfigKey.TL_ASCEND_AUTO_CV_SYNC: True,  # 自动核间同步
 }
+
 
 @tilelang.jit(out_idx=[-1], pass_configs=pass_configs)
 def matmul(M, N, K, block_M, block_N, K_L1, dtype="float16", accum_dtype="float"):
@@ -32,9 +33,9 @@ def matmul(M, N, K, block_M, block_N, K_L1, dtype="float16", accum_dtype="float"
 
     @T.prim_func
     def main(
-            A: T.Tensor((M, K), dtype),
-            B: T.Tensor((K, N), dtype),
-            C: T.Tensor((M, N), dtype),
+        A: T.Tensor((M, K), dtype),
+        B: T.Tensor((K, N), dtype),
+        C: T.Tensor((M, N), dtype),
     ):
         with T.Kernel(m_num * n_num, is_npu=True) as (cid, _):
             bx = cid // n_num
@@ -68,7 +69,8 @@ def matmul(M, N, K, block_M, block_N, K_L1, dtype="float16", accum_dtype="float"
 
 ```python
 import tilelang
-import tilelang.language as T
+import tilelang.ascend.a2a3.language as T
+
 
 # 保留默认 C/V 划分，核内同步由下方 barrier 管理
 @tilelang.jit(out_idx=[-1])
@@ -78,9 +80,9 @@ def matmul(M, N, K, block_M, block_N, block_K, dtype="float16", accum_dtype="flo
 
     @T.prim_func
     def main(
-            A: T.Tensor((M, K), dtype),
-            B: T.Tensor((K, N), dtype),
-            C: T.Tensor((M, N), accum_dtype),
+        A: T.Tensor((M, K), dtype),
+        B: T.Tensor((K, N), dtype),
+        C: T.Tensor((M, N), accum_dtype),
     ):
         with T.Kernel(m_num * n_num, is_npu=True) as (cid, _):
             bx = cid // n_num
@@ -180,8 +182,8 @@ with T.Kernel(m_num, is_npu=True) as (cid, vid):
 > 保留显式 workspace/vid 的写法见 [§7](#7-cv-融合--workspace--vid-写法复杂场景兜底)，配置选择以 [skill 主文](../SKILL.md#22-按场景选择-pass_configs) 为准。
 
 **已验证参考实现**（旧 vs 新，逐行对照）：
-- 旧（workspace+vid）：`examples/developer_mode/sparse_flash_attn_developer.py`
-- 新（消除）：`examples/developer_mode/sparse_flash_attn_developer_vid_reduce.py`
+- 旧（workspace+vid）：`examples/ascend_a2a3/developer_mode/sparse_flash_attn_developer.py`
+- 新（消除）：`examples/ascend_a2a3/developer_mode/sparse_flash_attn_developer_vid_reduce.py`
 
 ### 6.1 核心前提链（必须按序成立，不可跳级）
 
@@ -282,7 +284,7 @@ CV 融合典型场景：Vector 核解量化 + Cube 核 GEMM。
 
 ```python
 import tilelang
-import tilelang.language as T
+import tilelang.ascend.a2a3.language as T
 
 PASS_CONFIGS = {
     tilelang.PassConfigKey.TL_ASCEND_AUTO_SYNC: True,
@@ -293,6 +295,7 @@ PASS_CONFIGS = {
 
 VEC_NUM = 2
 BLOCK_K_HALF = 128
+
 
 @tilelang.jit(out_idx=[-1], pass_configs=PASS_CONFIGS)
 def w4a8_gemm_cv(M, N, K):
@@ -329,12 +332,12 @@ def w4a8_gemm_cv(M, N, K):
 
                 for k_chunk in T.serial(k_num):
                     chunk_offset = k_chunk * BLOCK_K_HALF
-                    
+
                     # 读数据（用 actual_row）
                     T.copy(B_packed[actual_row, chunk_offset], packed_ub)
-                    
+
                     # ... W4 解量化逻辑（T.tile.bitwise_and/rshift/cast/add）...
-                    
+
                     # 写 workspace（必须用 actual_row！）
                     T.copy(output_ub, workspace[actual_row, chunk_offset * 2])
 
@@ -346,11 +349,11 @@ def w4a8_gemm_cv(M, N, K):
 
             for k_chunk in T.serial(k_num):
                 k_offset = k_chunk * BLOCK_K_HALF * 2
-                
+
                 # Cube 核读取完整 block_N（不涉及 vid）
                 T.copy(A[bm * block_M, k_offset], A_L1)
                 T.copy(workspace[bn * block_N, k_offset], B_L1)  # 完整 16 行
-                
+
                 # init=(k_chunk == 0)：第一次调用清零 C_L0
                 T.gemm_v0(A_L1, B_L1, C_L0, transpose_B=True, init=(k_chunk == 0))
 

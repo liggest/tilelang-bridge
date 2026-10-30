@@ -1,15 +1,17 @@
 ---
 name: tilelang-op-profiling
-description: TileLang 算子 NPU 性能采集与分析，用于采集 TileLang kernel 性能数据、定位性能瓶颈并给出优化建议。当用户在 TileLang 算子开发过程中提到"上板性能"、"算子性能测试"、"硬件性能验证"、"NPU性能采集"、"NPU profiling"等场景时触发。
+description: TA来源A2/A3 TileLang 算子 NPU 性能采集与分析，用于采集 TileLang kernel 性能数据、定位性能瓶颈并给出优化建议。当用户在 TileLang 算子开发过程中提到"上板性能"、"算子性能测试"、"硬件性能验证"、"NPU性能采集"、"NPU profiling"等场景时触发。
 ---
 
 # TileLang 算子上板性能采集与调优
+
+> 来源与范围：完整内容来自 TA `463c234ce3087205c092e931207ca87b4cd5494c`，这里只适配 A2/A3 命名空间与主线执行边界。GPU/A5 使用其主线技能。迁移此文件不授权启动 msprof、上板、安装 SDK 或外部操作；实际工作沿用户明确任务和既有授权进行。用户只请求采集/分析时，不由下面的优化步骤擅自修改 kernel。
 
 在真实 NPU 上采集 TileLang kernel 性能数据，系统化解读性能指标文件，判定性能是否达标，定位瓶颈类型，并给出可操作的优化建议。
 
 ## 后端
 
-上游传入 target 时原样使用；否则优先复用现有入口已经显式指定的 target。两者都未指定时默认使用 AscendC：现有 JIT 入口不传 target 时会使用 `target="auto"`，当前仓库将 `auto` 解析为 AscendC；新建临时 profiling 入口时，在 `@tilelang.jit` 或 `tilelang.compile` / `tilelang.engine.lower` 中显式传入 `target="ascendc"`。AOT 入口的 `lower` 与 `LibraryGenerator` 使用同一 target，预运行和 `msprof` 采集也保持该 target。
+上游传入已确认的 A2/A3 target 时原样使用；否则优先复用已有生产入口的明确 target。现代主线的 `auto` 不等于默认 A2/A3：两者都未指定时，按 `docs/ascend_a2a3/migration.md` 核实实际 A2/A3 平台与已有入口，再选择 `ascendc` 或 `pto`；不能把 CUDA/A5 目标套进来。新建临时 profiling 入口使用 `tilelang.ascend.a2a3.language`，并在 `@tilelang.jit` 或公开 compile/lower 中固定同一 target。AOT 的 lower、LibraryGenerator、预运行和采集保持同一目标及冻结编译配置。
 
 ## 职责边界
 
@@ -63,21 +65,21 @@ Step 6: 修改代码 → 回到 Step 2 重新采集（数据自动归档为新�
 
 1. 上游已传入 `variant_output_dir` 时原样使用；
 2. 未传入时，从目标 kernel 的生产源码路径确定 `<operator_name>`：
-   - `examples/operators/<name>/...` 使用 `<name>`；
-   - 其他 `examples/.../<name>/<source_file>` 使用生产源码所在的实际算子目录 `<name>`；
-   - 源码直接位于 `examples/` 时，从文件名去掉 `example_` 前缀和扩展名；
+   - `examples/ascend_a2a3/operators/<name>/...` 使用 `<name>`；
+   - 其他 `examples/ascend_a2a3/.../<name>/<source_file>` 使用生产源码所在的实际算子目录 `<name>`；
+   - 源码直接位于 `examples/ascend_a2a3/` 时，从文件名去掉 `example_` 前缀和扩展名；
 3. 默认令 `<variant_output_dir>` 为仓库根目录下的
-   `examples/operators/<operator_name>`，所有算子的 profiling 输出统一放在
-   `examples/operators/`；
+   `examples/ascend_a2a3/operators/<operator_name>`，所有算子的 profiling 输出统一放在
+   `examples/ascend_a2a3/operators/`；
 4. 临时 profiling wrapper 只作为运行入口，不能用临时目录名推断算子名；
 5. 无法唯一确定生产源码或 `<operator_name>` 时停止并询问，不能猜测另一个算子目录。
 
-例如 `examples/gemm/example_gemm_intrinsic.py` 默认解析为
-`examples/operators/gemm`，实际输出根目录为 `examples/operators/gemm/perf_tuning/`。
+例如 `examples/ascend_a2a3/gemm/example_gemm_intrinsic.py` 默认解析为
+`examples/ascend_a2a3/operators/gemm`，实际输出根目录为 `examples/ascend_a2a3/operators/gemm/perf_tuning/`。
 首次采集的 `<variant>` 为 `baseline`；每次修改代码后的复测选择下一个未使用的
 `iter_NNN`。
 
-从脚本所在目录运行，或显式设置可靠的仓库根目录/PYTHONPATH。不要把临时 wrapper 写入 `examples/`，避免被批量 CI 自动发现。每个 case 先完成现有正确性测试；精度失败、编译失败或 NPU 执行失败时停止，不能输出“有效性能结论”。
+从脚本所在目录运行，或显式设置可靠的仓库根目录/PYTHONPATH。不要把临时 wrapper 写入 `examples/ascend_a2a3/`，避免被批量 CI 自动发现。每个 case 先完成现有正确性测试；精度失败、编译失败或 NPU 执行失败时停止，不能输出“有效性能结论”。
 
 profiling 入口应把 JIT/AOT 构建与正式采集分开，正式采集只发射已确认的目标 kernel。若使用现有入口，记录其完整命令和工作目录；若生成 wrapper，只接受该 case 必需参数，并只调用本地目标 kernel。禁止用整个 Python 进程或 host 计时代替设备 kernel 时间。
 
@@ -94,7 +96,7 @@ python <entry_file> <correctness_or_single_launch_args>
 
 ```bash
 CASE_COUNT=<matched_launch_count>
-OP_OUTPUT_DIR=<upstream_variant_output_dir_or_examples/operators/operator_name>
+OP_OUTPUT_DIR=<upstream_variant_output_dir_or_examples/ascend_a2a3/operators/operator_name>
 VARIANT=<baseline_or_iter_NNN>
 CASE_ID=<case_id>
 CASE_OUTPUT="$OP_OUTPUT_DIR/perf_tuning/msprof_raw/$VARIANT/$CASE_ID"
@@ -377,7 +379,7 @@ warm-up 和 launch-count 重新采集，并归档到下一个 `iter_NNN`。
 ## 数据目录结构
 
 以下 `<variant_output_dir>` 在上游未传入时固定解析为仓库根目录下的
-`examples/operators/<operator_name>`。
+`examples/ascend_a2a3/operators/<operator_name>`。
 
 ### msprof 输出（临时）
 

@@ -3,6 +3,8 @@ name: tilelang-op-design
 description: "根据算子需求生成 TileLang-Ascend 算子设计文档（design.md）。涵盖编程模式选型（Developer/Expert/混合）、API 映射、内存层级规划、Tiling 策略、循环结构、同步策略、验证方案等。触发：设计算子、生成 design.md、算子方案设计、新算子开发、算子实现方案。"
 ---
 
+> 适用范围：TA A2/A3 资产；主线 backend/build/IR/A5 技能保持独立。先读 docs/ascend_a2a3/migration.md，已有用户授权、模式与原配置优先；不重复请求同一批准，不因搬入本 skill 自动授权安装/外发/push/定时任务。
+
 # TileLang-Ascend 算子设计文档生成
 
 ## 1. 目标
@@ -90,8 +92,9 @@ description: "根据算子需求生成 TileLang-Ascend 算子设计文档（desi
      - 多步（如 softmax = max + sub + exp + sum + div）→ 多次计算、可能需要中间缓冲
      - 融合（如 flash attention = GEMM + softmax + GEMM）→ 核间协作、流水线
    - **动态 shape 判定**：是否存在运行时才确定的维度
-4. **非整除场景预判**：检查输入 shape 是否可能不被 block size 整除。`T.ceildiv(M, block_M)` 对非整除或 `M < block_M` 返回 ≥1（非零），`T.copy` 已支持动态 shape 切片自动处理尾块，**不需要 host padding**。用 `T.ceildiv` + 动态切片 `T.copy(A[m:m+valid, ...])`，参考 `examples/chunk_gated_delta_rule/expert_chunk_gated_delta_rule.py:107-108`。仅当多个 group 共享同一输出 buffer 时需注意尾块写入竞态——用 metadata 的 valid_m 字段限制写入范围 `T.copy(C_L0, Y[m:m+valid_m, ...])`
-5. **多 group 输出竞态约束**（grouped 类算子）：当多个 group 共享同一输出 buffer（紧凑排列，不 padding）时，尾块按 block_M 整块写会溢出到隔壁 group 的区域，导致竞态条件（执行顺序不确定→结果不确定）。解法：metadata 记录 valid_m，kernel 用 `T.copy(C_L0, Y[m_start : m_start + valid_m, ...])` 只写有效行。参考 `examples/grouped_gemm/example_grouped_gemm_fwd.py` 的 block_metadata[2]（valid_m 字段，当前未使用，应启用）。
+4. **非整除场景预判**：先核具体 copy 的 scope/dtype/alignment/尾块支持，再决定动态切片或 padding。`T.ceildiv` 只能解决迭代次数，不能单独证明数据搬运边界合法。固定 TA 的 `examples_experiment/chunk_gated_delta_rule/expert_chunk_gated_delta_rule.py` 是来源参考，迁移目标为 `examples_experiment/chunk_gated_delta_rule/expert_chunk_gated_delta_rule.py`；目标尚未迁时不作为可执行主线示例。对同一已支持 Region 路径，可参照源中的 valid_m 与尾块切片思路，并用原 shape/dtype/对齐条件验证。
+
+5. **多 group 输出竞态约束**（grouped 类算子）：当多个 group 共享同一输出 buffer（紧凑排列，不 padding）时，尾块按 block_M 整块写会溢出到隔壁 group 的区域，导致竞态条件（执行顺序不确定→结果不确定）。解法：metadata 记录 valid_m，kernel 用 `T.copy(C_L0, Y[m_start : m_start + valid_m, ...])` 只写有效行。参考 `examples_experiment/grouped_gemm/example_grouped_gemm_fwd.py` 的 block_metadata[2]（valid_m 字段，当前未使用，应启用）。
 6. **数据重排成本建模**：按 [references/ascend-constraints.md](references/ascend-constraints.md) §4.2 为每条路径和最大/关键 case 计算 DMA/GM
    标量访问/地址解码/并行度；不能只给 tile shape，不计算 transaction 数量。
 
@@ -140,7 +143,7 @@ description: "根据算子需求生成 TileLang-Ascend 算子设计文档（desi
 ### Phase 6：输出
 
 - 将 `design.md` 输出到当前目录或用户指定路径。若文件已存在，询问是否覆盖。
-- **同时产出 `proto.yaml`**（算子接口规格，模板见 [examples/design-template.md](examples/design-template.md) §11.5）：**dtype 全集取自 §9.3 精度表**（每个支持的 dtype 一行；§4.1 只给代表性 dtype，不作 dtype 全集来源）、attr 取自 §1/§4，**机械派生**写到同目录（`examples/{op}/proto.yaml`）。这是覆盖门禁 `coverage_check.py --proto` 的权威 dtype/attr 来源，**每个算子都必须产出**；`inputs[].dtype` 须与 §9.3 精度表的 dtype 行一致。
+- **同时产出 `proto.yaml`**（算子接口规格，模板见 [examples/design-template.md](examples/design-template.md) §11.5）：**dtype 全集取自 §9.3 精度表**（每个支持的 dtype 一行；§4.1 只给代表性 dtype，不作 dtype 全集来源）、attr 取自 §1/§4，**机械派生**写到同目录（`examples/ascend_a2a3/{op}/proto.yaml`）。这是覆盖门禁 `coverage_check.py --proto` 的权威 dtype/attr 来源，**每个算子都必须产出**；`inputs[].dtype` 须与 §9.3 精度表的 dtype 行一致。
 
 ---
 

@@ -45,10 +45,10 @@ PipelinePlanning + InjectSoftwarePipeline
 ```python
 def OptimizeForTarget(mod: IRModule, target: Target) -> IRModule:
     mod = tir.transform.PlanAndUpdateBufferAllocationLocation()(mod)
-    mod = tilelang.transform.CrossCorePipeline()(mod)          # 核间pipeline (先执行)
-    mod = tilelang.transform.CombineCV()(mod)                   # CV代码划分
-    mod = tilelang.transform.PipelinePlanning()(mod)            # 核内pipeline规划 (后执行)
-    mod = tilelang.transform.InjectSoftwarePipeline()(mod)      # 核内流水注入
+    mod = tilelang.transform.CrossCorePipeline()(mod)  # 核间pipeline (先执行)
+    mod = tilelang.transform.CombineCV()(mod)  # CV代码划分
+    mod = tilelang.transform.PipelinePlanning()(mod)  # 核内pipeline规划 (后执行)
+    mod = tilelang.transform.InjectSoftwarePipeline()(mod)  # 核内流水注入
 ```
 
 ![alt text](image.png)
@@ -80,15 +80,15 @@ T.Pipelined 注解
 ```python
 for i in T.Pipelined(cross_core_proc_num, num_stages=2):
     T.copy(Q[m_i, :], q_l1)
-    T.gemm(q_l1, k_l1, acc_s_l0c)            # Cube
+    T.gemm(q_l1, k_l1, acc_s_l0c)  # Cube
     T.copy(acc_s_l0c, workspace_1)
     T.copy(workspace_1, acc_s_ub_)
-    T.add(acc_s_ub, acc_s_ub, acc_s_ub_)      # Vector
+    T.add(acc_s_ub, acc_s_ub, acc_s_ub_)  # Vector
 ```
 
 → **CrossCorePipeline** 按 Cube/Vector scope 拆分 stage，扩展 workspace buffer 维度。
 
-**详细设计见：** [pipeline_planning & Inject_pipeline_design.md](./references/pass-designs/pipeline_planning%20&%20inject_pipeline_design.md)
+**详细设计见：** [pipeline_planning & Inject_pipeline_design.md](references/pass-designs/pipeline_planning%20%26%20inject_pipeline_design.md)
 
 ### 核内流水线
 
@@ -96,14 +96,14 @@ for i in T.Pipelined(cross_core_proc_num, num_stages=2):
 
 ```python
 for k in T.Pipelined(loop_k, num_stages=2):
-    T.copy(A[:, k*BLOCK_K], A_L1)            # CopyIn
-    T.copy(B[k*BLOCK_K, :], B_L1)            # CopyIn
-    T.gemm(A_L1, B_L1, C_L0)                 # Compute
+    T.copy(A[:, k * BLOCK_K], A_L1)  # copy-in
+    T.copy(B[k * BLOCK_K, :], B_L1)  # copy-in
+    T.gemm(A_L1, B_L1, C_L0)  # Compute
 ```
 
 → **PipelinePlanning** 分配 stage/order → **InjectSoftwarePipeline** 生成 prologue/body/epilogue 三段式。
 
-**详细设计见：** [pipeline_planning & inject_pipeline_design.md](./references/pass-designs/pipeline_planning%20&%20inject_pipeline_design.md)
+**详细设计见：** [pipeline_planning & inject_pipeline_design.md](references/pass-designs/pipeline_planning%20%26%20inject_pipeline_design.md)
 
 ---
 
@@ -127,7 +127,7 @@ for k in T.Pipelined(num_iters, num_stages=4, cross_interval=2):
 
 ```python
 for k in T.Pipelined(num_iters, num_stages=4):  # 核间
-    for side in T.serial(2):                      # 手动核内 double buffering
+    for side in T.serial(2):  # 手动核内 double buffering
         T.copy(K[side], k_l1)
         T.mma(l0a[side], l0b[side], l0c[side])
 ```
@@ -154,7 +154,7 @@ pass_configs = {
 
 | 功能 | 文件 | Pass 注册名 |
 |------|------|------------|
-| 核间流水线 | `src/transform/cross_core_pipeline.cc` | `tl.transform.CrossCorePipeline` |
-| 核内流水线规划 | `src/transform/pipeline_planning.cc` | `tl.transform.PipelinePlanning` |
-| 核内流水线注入 | `src/transform/inject_pipeline.cc` | `tl.transform.InjectSoftwarePipeline` |
-| Python 前端 | `tilelang/language/ascend_tile.py` | `T.Pipelined` |
+| 核间流水线 | `src/ascend/a2a3/transform/cross_core_pipeline.cc` | `tl.transform.A2A3CrossCorePipeline` |
+| 核内流水线规划 | `src/ascend/a2a3/transform/pipeline_planning.cc` | `tl.transform.A2A3PipelinePlanning` |
+| 核内流水线注入 | `src/ascend/a2a3/transform/inject_pipeline.cc` | `tl.transform.A2A3InjectSoftwarePipeline` |
+| Python 前端 | `tilelang/ascend/a2a3/language/ascend_tile.py` | `T.Pipelined` |

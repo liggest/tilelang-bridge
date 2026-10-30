@@ -1,3 +1,5 @@
+> TA 0deb8b93 来源算法参考：本页行号、旧IR与注册代码是原版本资料，不能作为当前可编译模板。现行接口以本地pipeline/native源码、main IR技能和pass-generate/references/integration-points.md为准。
+
 # AscendStorageRewrite Pass 设计文档
 
 ## 1. 背景与目标
@@ -55,8 +57,7 @@ TVM 原生 `StorageRewrite` 的核心逻辑可以概括为三步：
 
 ```python
 @T.prim_func
-def vector_reuse_bug(A: T.Buffer((256,), "float16"),
-                     B: T.Buffer((128,), "float16")):
+def vector_reuse_bug(A: T.Buffer((256,), "float16"), B: T.Buffer((128,), "float16")):
     temp_fp16 = T.allocate([256], "float16", "local")
     for i in T.serial(0, 256):
         temp_fp16[i] = A[i] + T.float16(1)

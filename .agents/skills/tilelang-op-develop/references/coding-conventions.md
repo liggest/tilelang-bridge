@@ -58,7 +58,7 @@ block_N_2 = block_N // VEC_NUM
 
 for row in T.serial(block_N_2):
     actual_row = bn * block_N + vid * block_N_2 + row  # 关键索引
-    
+
     # 读数据和写 workspace 都必须用 actual_row
     T.copy(B_packed[actual_row, chunk_offset], packed_ub)  # ✓
     # ... 处理 ...
@@ -90,7 +90,7 @@ T.copy(workspace[bn * block_N, k_offset], B_L1)  # 完整 block_N
 1. **host 侧 reshape 降维到 3D**：host 侧用 `permute` + `reshape` 把 4D+ 降维到 3D `(batch, M, N)`，使列维成为最内维。**⚠️ `reshape(-1)` 对非 contiguous 张量（如 `permute` 后）会触发物理拷贝，等价于 `.contiguous()`，属 [ascend-constraints.md §2](ascend-constraints.md) 禁止行为 #2，不得使用。** 替代方案：用 stride 作为 JIT 编译期常量传入 kernel（详见 §6 方案 A）。
 2. **调整 buffer 布局**：将 GM buffer 的维度排列调整为让列维（需要切片的维度）成为最内维。
 
-> **根因**：`src/op/ascend.cc` 的 `find_active_dim_indices` 和 `compute_strideN` 对 4D+ 切片的维度识别有缺陷，且即使修复后，`DataCopyPad` 硬件指令本身也不支持列方向 strided access。这是 AscendC 硬件的固有限制，非 codegen bug。详见 `tilelang-api-best-practices/references/api-kernel-memory.md` §T.copy 多维切片的硬件限制。
+> **根因**：`src/ascend/a2a3/op/ascend.cc` 的 `find_active_dim_indices` 和 `compute_strideN` 对 4D+ 切片的维度识别有缺陷，且即使修复后，`DataCopyPad` 硬件指令本身也不支持列方向 strided access。这是 AscendC 硬件的固有限制，非 codegen bug。详见 `tilelang-api-best-practices/references/api-kernel-memory.md` §T.copy 多维切片的硬件限制。
 
 ## 3. 同步
 
@@ -121,11 +121,11 @@ T.tile.broadcast(max_2d_ub, max_ub)
 
 ## 5. 测试模板
 
-分层结构、main 分发器、`--level` 与分层标记见 [examples/code-skeleton.md](../examples/code-skeleton.md) 的 `test_{op}.py` 段（kernel 与测试分文件：kernel 在 `{op}.py`，测试在 `test_{op}.py` 并 `from {op} import {op}`）。单个用例的 golden 对比写法：
+分层结构、main 分发器、`--level` 与分层标记见 [examples/ascend_a2a3/code-skeleton.md](../examples/code-skeleton.md) 的 `test_{op}.py` 段（kernel 与测试分文件：kernel 在 `{op}.py`，测试在 `test_{op}.py` 并 `from {op} import {op}`）。单个用例的 golden 对比写法：
 
 ```python
 # golden 对比（混合容差双门限，放在 try/except 内，按层打标记）
-# get_precision/check_precision 见 examples/code-skeleton.md，阈值定义见
+# get_precision/check_precision 见 examples/ascend_a2a3/code-skeleton.md，阈值定义见
 # tilelang-op-test-design/references/precision-standard.md（按 dtype，整型 0 误差精确匹配）
 ref_output = torch.nn.functional.softmax(input_data, dim=-1)  # 或手写 golden
 passed, ratio, max_abs = check_precision(output, ref_output, dtype)
@@ -279,7 +279,7 @@ single_core_load = ceildiv(task_count, core_num)
 
 这一骨架利用 DataCopy 的行间 gap 收集连续 record。应用到其他算子时，替换结构角色
 和坐标解码即可，不要照抄固定四维签名。可从已验证实现
-`examples/transpose/transpose.py::_kernel_4d_record_swap` 学习 `T.copy` 切片形式。
+`examples/ascend_a2a3/transpose/transpose.py::_kernel_4d_record_swap` 学习 `T.copy` 切片形式。
 
 #### 步骤 4：没有直接 record 路径时，在 UB 内重排
 
@@ -348,7 +348,7 @@ per_core_serial_tasks
 opaque record，用块/二维 `T.copy` 完成结构重排；无法直接搬运时，使用块 DMA
 GM→UB、UB-local 标量重排、块 DMA UB→GM。不得退化成逐元素 strided GM 访问。
 
-> **通用判断方法**：查看 `get_kernel_source()` 输出或 `src/tl_templates/ascend/common.h`，确认目标 dtype 是否走标量路径。如果走标量路径，寻找同宽的有硬件加速的 dtype 做 reinterpret，或 cast 到更宽的 dtype 做 kernel 内转换。
+> **通用判断方法**：查看 `get_kernel_source()` 输出或 `src/ascend/a2a3/tl_templates/ascend/common.h`，确认目标 dtype 是否走标量路径。如果走标量路径，寻找同宽的有硬件加速的 dtype 做 reinterpret，或 cast 到更宽的 dtype 做 kernel 内转换。
 
 参考实现：bfloat16→int16 host 侧 `view` reinterpret、int8 kernel 内 `T.tile.cast`
 到 float16；int64 优先 record-aware DMA，通用 fallback 可接受 `T.tile.transpose`

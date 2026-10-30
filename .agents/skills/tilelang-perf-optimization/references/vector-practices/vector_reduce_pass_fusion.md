@@ -4,7 +4,7 @@
 
 典型代表：Online Softmax（3-pass → 2-pass）。
 
-参考实现：`examples/softmax/example_online_softmax.py`
+参考实现：`examples/ascend_a2a3/softmax/example_online_softmax.py`
 
 ---
 
@@ -111,18 +111,18 @@ T.tile.fill(prev_max, -T.infinity(cal_dtype))
 T.tile.fill(prev_sum, 0.0)
 
 for by in T.serial(n_num):
-    T.copy(A[row_slice, by*block_N:(by+1)*block_N], a, pad_value=-T.infinity(cal_dtype))
+    T.copy(A[row_slice, by * block_N : (by + 1) * block_N], a, pad_value=-T.infinity(cal_dtype))
     # cast 到 fp32（若输入为低精度）
-    T.reduce_max(a_cal, tile_max, dim=-1)           # 当前块每行最大值
-    T.tile.max(tile_max, prev_max, tile_max)         # 更新全局最大值
-    T.tile.sub(tmp_exp, prev_max, tile_max)          # m_old - m_new
-    T.tile.exp(tmp_exp, tmp_exp)                     # 修正系数
-    T.tile.mul(tmp_exp, prev_sum, tmp_exp)           # 修正旧和
+    T.reduce_max(a_cal, tile_max, dim=-1)  # 当前块每行最大值
+    T.tile.max(tile_max, prev_max, tile_max)  # 更新全局最大值
+    T.tile.sub(tmp_exp, prev_max, tile_max)  # m_old - m_new
+    T.tile.exp(tmp_exp, tmp_exp)  # 修正系数
+    T.tile.mul(tmp_exp, prev_sum, tmp_exp)  # 修正旧和
     T.tile.broadcast(tile_max_2d, tile_max)
-    T.tile.sub(a_cal, a_cal, tile_max_2d)            # x_i - m_new
-    T.tile.exp(a_cal, a_cal)                         # exp(x_i - m_new)
-    T.reduce_sum(a_cal, tile_sum, dim=-1)            # 当前块指数和
-    T.tile.add(prev_sum, tile_sum, tmp_exp)          # s = 修正旧和 + 新块贡献
+    T.tile.sub(a_cal, a_cal, tile_max_2d)  # x_i - m_new
+    T.tile.exp(a_cal, a_cal)  # exp(x_i - m_new)
+    T.reduce_sum(a_cal, tile_sum, dim=-1)  # 当前块指数和
+    T.tile.add(prev_sum, tile_sum, tmp_exp)  # s = 修正旧和 + 新块贡献
     T.copy(tile_max, prev_max)
 ```
 
@@ -133,11 +133,11 @@ T.tile.broadcast(prev_max_2d, prev_max)
 T.tile.broadcast(prev_sum_2d, prev_sum)
 
 for by in T.serial(n_num):
-    T.copy(A[row_slice, by*block_N:(by+1)*block_N], a)
-    T.tile.sub(a_cal, a_cal, prev_max_2d)            # x_i - m_N
-    T.tile.exp(a_cal, a_cal)                         # exp(x_i - m_N)
-    T.tile.div(a_cal, a_cal, prev_sum_2d)            # / s_N
-    T.copy(a, B[row_slice, by*block_N:(by+1)*block_N])
+    T.copy(A[row_slice, by * block_N : (by + 1) * block_N], a)
+    T.tile.sub(a_cal, a_cal, prev_max_2d)  # x_i - m_N
+    T.tile.exp(a_cal, a_cal)  # exp(x_i - m_N)
+    T.tile.div(a_cal, a_cal, prev_sum_2d)  # / s_N
+    T.copy(a, B[row_slice, by * block_N : (by + 1) * block_N])
 ```
 
 ### UB 预算估算
@@ -191,7 +191,7 @@ torch.testing.assert_close(output, ref, rtol=rtol, atol=atol)
 ### 性能验证
 
 ```bash
-msprof op --kernel-name="main_kernel" --output=./msprof_output python ./examples/softmax/example_online_softmax.py
+msprof op --kernel-name="main_kernel" --output=./msprof_output python ./examples/ascend_a2a3/softmax/example_online_softmax.py
 ```
 
 对比基线（传统 3-pass softmax）关注：
