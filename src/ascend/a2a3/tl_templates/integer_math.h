@@ -14,7 +14,7 @@ namespace tl::ascend {
 // lowering.
 template <typename A, typename B>
 #ifdef __CCE_AICORE__
-__aicore__
+__host__ __aicore__
 #endif
     inline constexpr auto floor_div(A a, B b) -> decltype(a / b) {
   using R = decltype(a / b);
@@ -23,10 +23,10 @@ __aicore__
     R rhs = b;
     R q = lhs / rhs;
     R r = lhs % rhs;
-    if (r != 0 && ((r < 0) != (rhs < 0))) {
-      return q - 1;
-    }
-    return q;
+    // Keep correction branchless: helper control flow can affect CANN
+    // auto-sync.
+    R correction = static_cast<R>((r != 0) & ((r < 0) != (rhs < 0)));
+    return q - correction;
   } else {
     return a / b;
   }
@@ -34,7 +34,7 @@ __aicore__
 
 template <typename A, typename B>
 #ifdef __CCE_AICORE__
-__aicore__
+__host__ __aicore__
 #endif
     inline constexpr auto floor_mod(A a, B b) -> decltype(a % b) {
   using R = decltype(a % b);
@@ -46,10 +46,8 @@ __aicore__
       return R(0);
     }
     R r = lhs % rhs;
-    if (r != 0 && ((r < 0) != (rhs < 0))) {
-      return r + rhs;
-    }
-    return r;
+    R correction = static_cast<R>((r != 0) & ((r < 0) != (rhs < 0)));
+    return r + correction * rhs;
   } else {
     return a % b;
   }
