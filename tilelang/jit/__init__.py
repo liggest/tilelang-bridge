@@ -93,6 +93,35 @@ class _CallFormCache:
         self._remember(call_form_key, kernel)
 
 
+def _prepare_compile_arguments(func, out_idx, pass_configs, compile_flags):
+    """Merge frontend request attributes for public compile and autotuning."""
+    assert isinstance(func, PrimFunc), f"target function must be a PrimFunc but got {type(func)}"
+
+    # Merge function-level attrs from PrimFunc
+    func_attrs = func.attrs
+    if func_attrs and "tilelang_out_idx" in func_attrs:
+        func_out_idx = list(func_attrs["tilelang_out_idx"])
+        if out_idx is not None:
+            raise ValueError("Out index conflict: out_idx is specified and prim_func have returned `T.empty` tensors")
+        out_idx = func_out_idx
+    if func_attrs and "tilelang_pass_configs" in func_attrs:
+        func_pc = dict(func_attrs["tilelang_pass_configs"])
+        if pass_configs is not None:
+            # External pass_configs override function-level ones
+            func_pc.update(pass_configs)
+        pass_configs = func_pc
+    if func_attrs and "tilelang_compile_flags" in func_attrs:
+        func_cf = list(func_attrs["tilelang_compile_flags"])
+        if compile_flags is not None:
+            if isinstance(compile_flags, str):
+                func_cf.append(compile_flags)
+            else:
+                func_cf.extend(compile_flags)
+        compile_flags = func_cf
+
+    return out_idx, pass_configs, compile_flags
+
+
 def compile(
     func: PrimFunc[_KP, _T] = None,
     out_idx: list[int] | int | None = None,
@@ -102,6 +131,7 @@ def compile(
     verbose: bool | None = None,
     pass_configs: dict[str, Any] | None = None,
     compile_flags: list[str] | str | None = None,
+    workspace_idx: list[int] | int | None = None,
 ) -> JITKernel[_KP, _T]:
     """
     Compile the given TileLang PrimFunc with TVM and build a JITKernel.
@@ -112,6 +142,10 @@ def compile(
         The TileLang TIR function to compile and wrap.
     out_idx : Union[List[int], int], optional
         Index(es) of the output tensors to return (default: None).
+    workspace_idx : list[int] | int | None
+        Deprecated A2A3 compatibility option: automatically allocate these tensor
+        parameters, supporting negative indices. Prefer language-owned allocation
+        when that replacement is available.
     execution_backend : Literal["auto", "tvm_ffi", "cython", "nvrtc", "torch", "cutedsl", "pto"], optional
         Execution backend to use for kernel execution. If None, reads from
         TILELANG_EXECUTION_BACKEND environment variable (defaults to "auto").
@@ -139,29 +173,7 @@ def compile(
         Set to "1", "true", "yes", or "on" to enable verbose compilation by default.
     """
 
-    assert isinstance(func, PrimFunc), f"target function must be a PrimFunc but got {type(func)}"
-
-    # Merge function-level attrs from PrimFunc
-    func_attrs = func.attrs
-    if func_attrs and "tilelang_out_idx" in func_attrs:
-        func_out_idx = list(func_attrs["tilelang_out_idx"])
-        if out_idx is not None:
-            raise ValueError("Out index conflict: out_idx is specified and prim_func have returned `T.empty` tensors")
-        out_idx = func_out_idx
-    if func_attrs and "tilelang_pass_configs" in func_attrs:
-        func_pc = dict(func_attrs["tilelang_pass_configs"])
-        if pass_configs is not None:
-            # External pass_configs override function-level ones
-            func_pc.update(pass_configs)
-        pass_configs = func_pc
-    if func_attrs and "tilelang_compile_flags" in func_attrs:
-        func_cf = list(func_attrs["tilelang_compile_flags"])
-        if compile_flags is not None:
-            if isinstance(compile_flags, str):
-                func_cf.append(compile_flags)
-            else:
-                func_cf.extend(compile_flags)
-        compile_flags = func_cf
+    out_idx, pass_configs, compile_flags = _prepare_compile_arguments(func, out_idx, pass_configs, compile_flags)
 
     return cached(
         func=func,
@@ -172,6 +184,7 @@ def compile(
         verbose=verbose,
         pass_configs=pass_configs,
         compile_flags=compile_flags,
+        **({"workspace_idx": workspace_idx} if workspace_idx is not None else {}),
     )
 
 
@@ -186,6 +199,7 @@ def par_compile(
     compile_flags: list[str] | str | None = None,
     num_workers: int | None = None,
     ignore_error: bool = False,
+    workspace_idx: list[int] | int | None = None,
 ) -> list[JITKernel[_KP, _T]]:
     """
     Parallel compile multiple TileLang PrimFunc with TVM and build JITKernels.
@@ -246,6 +260,7 @@ def par_compile(
                 verbose=verbose,
                 pass_configs=pass_configs,
                 compile_flags=compile_flags,
+                **({"workspace_idx": workspace_idx} if workspace_idx is not None else {}),
             )
             future_map[future] = i
             futures.append(future)
@@ -343,6 +358,7 @@ class JITImpl(Generic[_P, _KP, _T, _Ret]):
     """
 
     out_idx: list[int] | int | None
+    workspace_idx: list[int] | int | None = field(default=None, kw_only=True)
     execution_backend: Literal["auto", "tvm_ffi", "cython", "nvrtc", "torch", "cutedsl", "pto"] | None
     target: TargetLike | None
     target_host: TargetLike | None
@@ -367,11 +383,12 @@ class JITImpl(Generic[_P, _KP, _T, _Ret]):
         self._call_form_cache: _CallFormCache = _CallFormCache()
         self._tuner_cache: dict[tuple, Kernel] = {}
 
-    def _get_frontend_target_context(self):
-        if self.target is None:
+    def _get_frontend_target_context(self, target=None):
+        target = self.target if target is None else target
+        if target is None:
             return nullcontext()
         try:
-            target = determine_target(self.target, return_object=True)
+            target = determine_target(target, return_object=True)
         except Exception:
             return nullcontext()
         if isinstance(target, Target):
@@ -382,8 +399,12 @@ class JITImpl(Generic[_P, _KP, _T, _Ret]):
         """
         Retrieve a TIR (Tensor Intermediate Representation) PrimFunc from the stored callable or object.
         """
+        return self._get_tir_with_target(self.target, *args, **kwargs)
+
+    def _get_tir_with_target(self, target, *args, **kwargs):
+        """Elaborate with an already selected target without changing JIT state."""
         self.initialize_jit_mode(*args, **kwargs)
-        with self._get_frontend_target_context():
+        with self._get_frontend_target_context(target):
             if isinstance(self.func, PrimFunc):
                 tir = self.func
             elif callable(self.func):
@@ -461,22 +482,33 @@ class JITImpl(Generic[_P, _KP, _T, _Ret]):
             verbose=self.verbose,
             pass_configs=self.pass_configs,
             compile_flags=self.compile_flags,
+            **({"workspace_idx": self.workspace_idx} if self.workspace_idx is not None else {}),
             num_workers=num_workers,
             ignore_error=ignore_error,
         )
 
     def compile(self, *args: _P.args, **kwargs: _P.kwargs) -> _Ret:
-        prim_func = self.get_tir(*args, **kwargs)
-        kernel_result = compile(
-            prim_func,
-            out_idx=self.out_idx,
-            execution_backend=self.execution_backend,
-            target=self.target,
-            target_host=self.target_host,
-            verbose=self.verbose,
-            pass_configs=self.pass_configs,
-            compile_flags=self.compile_flags,
+        def compile_program(prim_func):
+            return compile(
+                prim_func,
+                out_idx=self.out_idx,
+                execution_backend=self.execution_backend,
+                target=self.target,
+                target_host=self.target_host,
+                verbose=self.verbose,
+                pass_configs=self.pass_configs,
+                compile_flags=self.compile_flags,
+                **({"workspace_idx": self.workspace_idx} if self.workspace_idx is not None else {}),
+            )
+
+        return self._compile_with(compile_program, None, *args, **kwargs)
+
+    def _compile_with(self, compile_program, frontend_target, *args, **kwargs):
+        """Use a private compile callback while retaining normal debug artifacts."""
+        prim_func = (
+            self.get_tir(*args, **kwargs) if frontend_target is None else self._get_tir_with_target(frontend_target, *args, **kwargs)
         )
+        kernel_result = compile_program(prim_func)
 
         if self.debug_root_path:
             if isinstance(self.func, PrimFunc):
@@ -532,6 +564,7 @@ class JITImpl(Generic[_P, _KP, _T, _Ret]):
                 "verbose": self.verbose,
                 "pass_configs": self.pass_configs,
                 "compile_flags": self.compile_flags,
+                **({"workspace_idx": self.workspace_idx} if self.workspace_idx is not None else {}),
             }
             return compile_args
 
@@ -577,6 +610,7 @@ def jit(func: Callable[_KP, _T]) -> JITImpl[_KP, _KP, _T, _T]: ...
 def jit(
     *,
     out_idx: Any = None,
+    workspace_idx: list[int] | int | None = None,
     target: TargetLike | None = None,
     target_host: TargetLike | None = None,
     execution_backend: ExecutionBackend | None = None,
@@ -591,6 +625,7 @@ def jit(
     func: Callable[_P, _T] | PrimFunc | None = None,
     *,  # Indicates subsequent arguments are keyword-only
     out_idx: list[int] | int | None = None,
+    workspace_idx: list[int] | int | None = None,
     target: TargetLike | None = None,
     target_host: TargetLike | None = None,
     execution_backend: ExecutionBackend | None = None,
@@ -632,6 +667,7 @@ def jit(
 
     compile_args = dict(
         out_idx=out_idx,
+        **({"workspace_idx": workspace_idx} if workspace_idx is not None else {}),
         execution_backend=execution_backend,
         target=target,
         target_host=target_host,
